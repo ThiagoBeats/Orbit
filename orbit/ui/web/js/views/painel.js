@@ -87,7 +87,7 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
     el.innerHTML = `
       <div class="crumb">${crumb}</div>
       <div class="titulo-painel"><h1>${esc(c.nome)}</h1>
-        ${maquina ? '' : '<button type="button" class="btn" id="pn-dados">Dados do projeto</button>'}</div>
+        <button type="button" class="btn" id="pn-dados">${maquina ? 'Dados da máquina' : 'Dados do projeto'}</button></div>
       ${n > 0 ? `<div class="faixa-aviso"><span>${n} ${n === 1 ? 'arquivo na pasta não está registrado'
         : 'arquivos na pasta não estão registrados'}</span>
         <button type="button" class="btn pequeno" id="pn-revisar">Revisar</button></div>` : ''}
@@ -197,6 +197,11 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
   }
   P.novaRevisao = novaRevisao;
 
+  function enviarEmail(selecoes) {
+    return popupEmail({ containerId: id, selecoes, nomesTipos: nomesTipos() }).catch(() => {});
+  }
+  P.enviarEmail = enviarEmail;
+
   async function acaoMenu(acao, d) {
     if (acao === 'status') {
       if (await popupStatus({ containerId: id, doc: d })) await carregar();
@@ -249,11 +254,19 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
       if (!b) return;
       const d = doc(P.sel);
       if (b.dataset.v === 'nova') novaRevisao(d.tipo_id);
-      else if (b.dataset.v === 'hist') popupHistorico({ containerId: id, nomesTipos: nomesTipos() }).catch(() => {});
+      else if (b.dataset.v === 'hist') popupHistorico({ containerId: id, nomesTipos: nomesTipos(),
+        documentos: P.dados.documentos, aoEnviar: (tipo, numero) => enviarEmail([{ tipo_id: tipo, numero }]) }).catch(() => {});
       else if (b.dataset.v === 'pasta') api('abrir_pasta', id, d.tipo_id).catch(() => {});
-      else if (b.dataset.v === 'email') _emBreve('Enviar por e-mail');
+      else if (b.dataset.v === 'email') {
+        const rev = d.revisoes.find(x => x.numero === P.ver) || d.atual || d.revisoes[0];
+        if (rev) enviarEmail([{ tipo_id: d.tipo_id, numero: rev.numero }]);
+      }
     });
-    el.querySelector('#pn-email-varios').addEventListener('click', () => _emBreve('Enviar por e-mail'));
+    el.querySelector('#pn-email-varios').addEventListener('click', () => {
+      const sels = P.dados.documentos.filter(d => P.marcados.has(d.tipo_id) && d.atual)
+        .map(d => ({ tipo_id: d.tipo_id, numero: d.atual.numero }));
+      if (sels.length) enviarEmail(sels);
+    });
     el.querySelector('#pn-limpar').addEventListener('click', () => {
       P.marcados.clear();
       el.querySelectorAll('[data-marcar]').forEach(cb => { cb.checked = false; });
@@ -263,7 +276,10 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
     if (revisar) revisar.addEventListener('click', () => _emBreve('Arquivos não registrados'));
     const dados = el.querySelector('#pn-dados');
     if (dados) dados.addEventListener('click', async () => {
-      if (await popupDadosProjeto({ projeto: P.dados.container })) await carregar();
+      const salvo = P.dados.container.tipo === 'maquina'
+        ? await popupDadosMaquina({ maquina: P.dados.container })
+        : await popupDadosProjeto({ projeto: P.dados.container });
+      if (salvo) await carregar();
     });
   }
 

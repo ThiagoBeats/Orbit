@@ -16,9 +16,11 @@ from pathlib import Path
 
 from orbit.core.config import (TEMAS, load_shared_config, load_user_settings,
                                save_user_settings)
+from orbit.core.email import EmailDraft, EmailService, SelecaoEnvio
 from orbit.core.errors import OrbitDataError, OrbitError
 from orbit.core.identity import current_identity
 from orbit.core.models import Contato, Revisao
+from orbit.core.outlook import OutlookClient
 from orbit.core.reconcile import find_untracked
 from orbit.core.repository import Repository
 from orbit.core.revisions import PASTA_ANTIGOS, RevisionService
@@ -60,7 +62,9 @@ def caminho_log_padrao() -> Path:
 
 
 class Api:
-    def __init__(self, settings_path: Path | None = None, log_path: Path | None = None):
+    def __init__(self, settings_path: Path | None = None, log_path: Path | None = None,
+                 outlook=None):
+        self._outlook = outlook if outlook is not None else OutlookClient()
         self._settings_path = settings_path
         self._log_path = log_path
         self._janela = None
@@ -435,6 +439,136 @@ class Api:
         with self._trava_escrita:
             self._revisoes().definir_nao_se_aplica(container_id, tipo_id, bool(valor))
         return None
+
+    # --- máquinas padrão -----------------------------------------------------
+
+    def listar_maquinas(self) -> dict:
+        return self._chamar(self._listar_maquinas)
+
+    def _listar_maquinas(self):
+        return [asdict(m) for m in self._exigir_repo().list_maquinas()]
+
+    def criar_maquina(self, dados) -> dict:
+        return self._chamar(self._criar_maquina, dados)
+
+    def _criar_maquina(self, dados):
+        repo = self._exigir_repo()
+        if not isinstance(dados, dict):
+            raise OrbitError("Dados da máquina inválidos.")
+        with self._trava_escrita:
+            c = repo.create_maquina(str(dados.get("codigo") or ""), str(dados.get("nome") or ""),
+                                    str(dados.get("descricao") or ""))
+        return {"id": c.id, "nome": c.nome, "codigo": c.codigo}
+
+    def atualizar_maquina(self, id, dados) -> dict:
+        return self._chamar(self._atualizar_maquina, id, dados)
+
+    def _atualizar_maquina(self, id, dados):
+        repo = self._exigir_repo()
+        if not isinstance(dados, dict):
+            raise OrbitError("Dados da máquina inválidos.")
+        if repo.load_container(id).tipo != "maquina":
+            raise OrbitError("Este item não é uma máquina padrão.")
+        campos = {k: str(dados[k]).strip() for k in ("codigo", "nome", "descricao") if k in dados}
+        if "nome" in campos and not campos["nome"]:
+            raise OrbitError("Informe o nome da máquina.")
+        with self._trava_escrita:
+            repo.update_dados(id, **campos)
+        return None
+
+    # --- e-mail e envios -------------------------------------------------------
+
+    def montar_email(self, container_id, selecoes) -> dict:
+        return self._chamar(self._montar_email, container_id, selecoes)
+
+    def _montar_email(self, container_id, selecoes):
+        repo = self._exigir_repo()
+        sels = _validar_selecoes(repo, container_id, selecoes)
+        svc = EmailService(repo, self._outlook)
+        rascunho = svc.montar(container_id, sels)
+        c = repo.load_container(container_id)
+        anexos = []
+        for s in sels:
+            principais = {a.nome for r in c.documentos[s.tipo_id].revisoes
+                          if r.numero == s.numero for a in r.arquivos if a.papel == "principal"}
+            for caminho in svc.montar(container_id, [s]).anexos:
+                anexos.append({"nome": caminho.name, "tamanho": caminho.stat().st_size,
+                               "tipo_id": s.tipo_id, "numero": s.numero,
+                               "papel": "principal" if caminho.name in principais else "editavel"})
+        return {"destinatarios": rascunho.destinatarios, "assunto": rascunho.assunto,
+                "corpo": rascunho.corpo, "anexos": anexos,
+                "tamanho_total": sum(a["tamanho"] for a in anexos)}
+
+    def preparar_email(self, container_id, draft, selecoes) -> dict:
+        return self._chamar(self._preparar_email, container_id, draft, selecoes)
+
+    def _preparar_email(self, container_id, draft, selecoes):
+        repo = self._exigir_repo()
+        sels = _validar_selecoes(repo, container_id, selecoes)
+        if not isinstance(draft, dict):
+            raise OrbitError("Rascunho de e-mail inválido.")
+        lista, assunto, corpo = draft.get("destinatarios"), draft.get("assunto"), draft.get("corpo")
+        if (not isinstance(lista, list) or not all(isinstance(x, str) for x in lista)
+                or not isinstance(assunto, str) or not isinstance(corpo, str)):
+            raise OrbitError("Rascunho de e-mail inválido.")
+        destinatarios = [p.strip() for x in lista for p in x.split(";") if p.strip()]
+        svc = EmailService(repo, _OutlookAmigavel(self._outlook))
+        # os anexos nunca vêm do JS: são refeitos a partir das seleções
+        anexos = svc.montar(container_id, sels).anexos
+        with self._trava_escrita:
+            svc.preparar(container_id, EmailDraft(destinatarios, assunto, corpo, anexos), sels)
+        return None
+
+    def listar_envios(self, cliente_id=None) -> dict:
+        return self._chamar(self._listar_envios, cliente_id)
+
+    def _listar_envios(self, cliente_id):
+        repo = self._exigir_repo()
+        if cliente_id in (None, ""):
+            cliente_id = None
+        elif not isinstance(cliente_id, str):
+            raise OrbitError("Cliente inválido.")
+        return EmailService(repo, self._outlook).listar_envios(cliente_id)
+
+
+class _OutlookAmigavel:
+    """Transforma falhas COM do Outlook (pywintypes.com_error etc.) em OrbitError."""
+
+    def __init__(self, outlook):
+        self._o = outlook
+
+    def disponivel(self) -> bool:
+        return bool(self._o.disponivel())
+
+    def abrir_rascunho(self, d) -> None:
+        try:
+            self._o.abrir_rascunho(d)
+        except OrbitError:
+            raise
+        except Exception as e:
+            raise OrbitError("Não foi possível criar o e-mail no Outlook. Verifique se o "
+                             f"Outlook clássico está instalado e aberto sem janelas pendentes. ({e})")
+
+
+def _validar_selecoes(repo, container_id, selecoes) -> list[SelecaoEnvio]:
+    if not isinstance(selecoes, list) or not selecoes:
+        raise OrbitError("Selecione ao menos um documento para enviar.")
+    c = repo.load_container(container_id)
+    out, vistos = [], set()
+    for s in selecoes:
+        if not isinstance(s, dict) or not isinstance(s.get("tipo_id"), str):
+            raise OrbitError("Seleção de documento inválida.")
+        if s["tipo_id"] not in c.documentos:
+            raise OrbitError(f"Tipo de documento não encontrado: {s['tipo_id']}")
+        ed = s.get("incluir_editaveis", False)
+        if not isinstance(ed, bool):
+            raise OrbitError("Seleção de documento inválida.")
+        numero = _numero_revisao(s.get("numero"))
+        if (s["tipo_id"], numero) in vistos:
+            continue
+        vistos.add((s["tipo_id"], numero))
+        out.append(SelecaoEnvio(s["tipo_id"], numero, ed))
+    return out
 
 
 def _abrir_no_windows(caminho: Path) -> None:

@@ -90,7 +90,7 @@ function _formatarDataHora(iso) {
   return m ? `${m[3]}/${m[2]}/${m[1].slice(2)} ${m[4]}:${m[5]}` : esc(iso);
 }
 
-async function popupHistorico({ containerId, nomesTipos }) {
+async function popupHistorico({ containerId, nomesTipos, documentos = [], aoEnviar = null }) {
   const eventos = await api('obter_historico', containerId);
   const linhas = eventos.length ? eventos.map(e => `
     <div class="evento">
@@ -98,14 +98,25 @@ async function popupHistorico({ containerId, nomesTipos }) {
       <div class="oque">${_descreverEvento(e, nomesTipos)}
         <div class="quem">${esc(e.usuario)}${e.computador ? ` · ${esc(e.computador)}` : ''}</div></div>
     </div>`).join('') : '<p class="texto-sec">Nenhum evento registrado.</p>';
+  const antigas = aoEnviar ? documentos.flatMap(d => d.revisoes.filter(r => r.arquivada)
+    .map(r => ({ tipo_id: d.tipo_id, nome: d.nome, ...r }))) : [];
+  const secaoAntigas = antigas.length ? `<div class="secao-revisoes">
+    <div class="secao-titulo">Revisões antigas</div>${antigas.map((r, i) => `
+    <div class="rev-antiga"><span>${esc(r.nome)} · ${formatarRev(r.numero)} · ${esc(formatarDataCurta(r.data))}</span>
+      <button type="button" class="btn pequeno" data-enviar="${i}">Enviar</button></div>`).join('')}</div>` : '';
   return new Promise(resolve => {
     const popup = abrirPopup({
       titulo: 'Histórico',
       subtitulo: 'Do mais recente para o mais antigo.',
       classe: 'largo',
-      corpoHtml: `<div class="lista-eventos">${linhas}</div>`,
+      corpoHtml: `${secaoAntigas}<div class="lista-eventos">${linhas}</div>`,
       botoes: [{ texto: 'Fechar', primario: true }],
     });
+    popup.elemento.querySelectorAll('[data-enviar]').forEach(b => b.addEventListener('click', () => {
+      const r = antigas[Number(b.dataset.enviar)];
+      popup.fechar();
+      aoEnviar(r.tipo_id, r.numero);
+    }));
     popup._aoFechar = () => resolve();
   });
 }

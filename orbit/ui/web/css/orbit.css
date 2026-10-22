@@ -190,3 +190,22 @@ main.painel { display:flex; gap:20px; padding:4px 32px 40px; }
 .evento .quando { color:var(--muted); white-space:nowrap; min-width:110px; }
 .evento .oque b { font-weight:500; }
 .evento .quem { color:var(--muted); font-size:12px; margin-top:2px; }
+
+/* ---- Máquinas, e-mail e envios (Tarefa 12) ---------------------------------- */
+.field textarea { width:100%; background:var(--surface2); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-family:inherit; font-size:13px; color:var(--text); outline:none; resize:vertical; transition:border-color .2s; }
+.field textarea:focus { border-color:var(--accent); }
+.anexos-lista { max-height:34vh; overflow:auto; border:1px solid var(--line); border-radius:8px; padding:4px 12px; background:var(--surface2); }
+.anexo-grupo { padding:8px 0; border-bottom:1px solid var(--line); }
+.anexo-grupo:last-child { border-bottom:none; }
+.anexo-grupo.desmarcado .anexo-arq, .anexo-grupo.desmarcado .anexo-linha.ed { opacity:.45; }
+.anexo-linha { display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; }
+.anexo-linha.ed { margin-top:6px; color:var(--muted); }
+.anexo-arq { font-size:12px; margin:2px 0 0 24px; word-break:break-all; }
+.aviso-ambar { color:var(--warn); }
+.erro-email { margin-top:12px; padding:10px 14px; border:1px solid var(--pend); border-radius:12px; background:color-mix(in srgb, var(--pend) 12%, var(--surface)); color:var(--pend); font-size:13px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.tabela { width:100%; border-collapse:collapse; font-size:13px; }
+.tabela th { text-align:left; font-weight:500; color:var(--muted); padding:8px 12px; border-bottom:1px solid var(--line); }
+.tabela td { padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+.tabela .nowrap { white-space:nowrap; }
+.rev-antiga { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:4px 0; font-size:13px; }
+.secao-revisoes { margin-bottom:16px; padding-bottom:8px; border-bottom:1px solid var(--line); }
