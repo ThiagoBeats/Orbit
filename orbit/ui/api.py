@@ -8,6 +8,7 @@ Convenção: todo método público devolve {"ok": True, "dados": ...} ou
 """
 import os
 import re
+import shutil
 import threading
 import traceback
 import unicodedata
@@ -15,15 +16,15 @@ from dataclasses import asdict
 from datetime import date, datetime
 from pathlib import Path
 
-from orbit.core.config import (TEMAS, load_shared_config, load_user_settings,
-                               save_user_settings)
+from orbit.core.config import (TEMAS, add_tipo, load_shared_config, load_user_settings,
+                               save_shared_config, save_user_settings)
 from orbit.core.email import EmailDraft, EmailService, SelecaoEnvio
 from orbit.core.errors import OrbitDataError, OrbitError
 from orbit.core.identity import current_identity
 from orbit.core.models import Contato, Revisao
 from orbit.core.outlook import OutlookClient
 from orbit.core.importer import PAPEIS, ImportService, ItemImportacao
-from orbit.core.naming import parse_rev
+from orbit.core.naming import parse_rev, sanitize
 from orbit.core.reconcile import find_untracked, register_untracked
 from orbit.core.repository import Repository
 from orbit.core.revisions import PASTA_ANTIGOS, RevisionService
@@ -31,6 +32,10 @@ from orbit.ui.fileserver import FileServer
 
 _DIALOGO_ARQUIVO = 10  # webview.FileDialog.OPEN (pywebview 6.x)
 _DIALOGO_PASTA = 20  # webview.FileDialog.FOLDER (pywebview 6.x)
+
+EXT_LOGO = (".png", ".jpg", ".jpeg", ".svg", ".webp")
+TAMANHO_MAX_LOGO = 5 * 1024 * 1024
+PREFIXO_LOGO = "logo-empresa"
 
 VISUALIZAVEIS = (".pdf", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")
 
@@ -181,7 +186,169 @@ class Api:
 
     def _get_config(self):
         self._exigir_base()
-        return self._config.to_dict()
+        dados = self._config.to_dict()
+        dados["logo_url"] = self._logo_url()
+        return dados
+
+    def _logo_url(self) -> str | None:
+        nome = self._config.logo_empresa
+        if not nome:
+            return None
+        arq = self._base / ".orbit" / Path(str(nome)).name  # nunca sai de .orbit
+        try:
+            mtime = arq.stat().st_mtime_ns
+            return f"{self._fileserver.url_para(arq)}?v={mtime}"
+        except (OSError, OrbitError):
+            return None
+
+    # --- configurações: tipos, status, logo --------------------------------------
+
+    def trocar_pasta_base(self) -> dict:
+        """Mesmo caminho seguro de escolher_pasta_base (a nova base abre antes de fechar a antiga)."""
+        return self._chamar(self._escolher_pasta_base)
+
+    def _config_atual_do_disco(self):
+        """Config compartilhada relida do disco: outra máquina pode ter alterado desde a abertura."""
+        self._exigir_base()
+        return load_shared_config(self._base)
+
+    def _aplicar_config(self, nova) -> None:
+        save_shared_config(self._base, nova)
+        # mesmo objeto (o Repository o referencia): atualiza no lugar
+        self._config.tipos, self._config.status = nova.tipos, nova.status
+        self._config.logo_empresa = nova.logo_empresa
+
+    def salvar_tipos(self, tipos) -> dict:
+        return self._chamar(self._salvar_tipos, tipos)
+
+    def _salvar_tipos(self, tipos):
+        if not isinstance(tipos, list):
+            raise OrbitError("Lista de tipos inválida.")
+        with self._trava_escrita:
+            cfg = self._config_atual_do_disco()
+            existentes = {t.id: t for t in cfg.tipos}
+            vistos, novos = set(), []
+            for item in tipos:
+                if not isinstance(item, dict):
+                    raise OrbitError("Lista de tipos inválida.")
+                nome, ativo, tid = item.get("nome"), item.get("ativo"), item.get("id")
+                if not isinstance(nome, str) or not sanitize(nome):
+                    raise OrbitError("Informe o nome de todos os tipos de documento.")
+                if not isinstance(ativo, bool):
+                    raise OrbitError("Situação do tipo inválida.")
+                if tid is None:
+                    novos.append((sanitize(nome), ativo))
+                    continue
+                if not isinstance(tid, str) or tid not in existentes:
+                    raise OrbitError(f"Tipo de documento não encontrado: {tid}")
+                if tid in vistos:
+                    raise OrbitError("Tipo de documento repetido na lista.")
+                vistos.add(tid)
+                existentes[tid].nome = sanitize(nome)
+                existentes[tid].ativo = ativo
+            faltando = [t.nome for t in cfg.tipos if t.id not in vistos]
+            if faltando:
+                raise OrbitError("Tipos de documento não podem ser removidos (desative-os "
+                                 f"no lugar): {', '.join(faltando)}")
+            for nome, ativo in novos:
+                add_tipo(cfg, nome).ativo = ativo
+            nomes = [t.nome.casefold() for t in cfg.tipos]
+            if len(set(nomes)) != len(nomes):
+                raise OrbitError("Já existe um tipo de documento com esse nome.")
+            self._aplicar_config(cfg)
+        return self._get_config()
+
+    def _status_em_uso(self) -> dict[str, list[str]]:
+        """status -> documentos cuja revisão ATUAL o usa ("<container> — <tipo>")."""
+        repo = self._exigir_repo()
+        nomes = {t.id: t.nome for t in repo.config.tipos}
+        resumos = [m for c in repo.list_clientes() for m in repo.list_projetos(c.id)]
+        resumos += repo.list_maquinas()
+        uso: dict[str, list[str]] = {}
+        for m in resumos:
+            if m.erro or not m.id:
+                continue  # JSON ilegível já aparece marcado com erro nas listas
+            c = repo.load_container(m.id)
+            _normalizar_numeros(c)
+            for d in c.documentos.values():
+                atual = d.atual
+                if atual is not None:
+                    uso.setdefault(atual.status, []).append(
+                        f"{c.nome} — {nomes.get(d.tipo_id, d.tipo_id)}")
+        return uso
+
+    def salvar_status(self, status) -> dict:
+        return self._chamar(self._salvar_status, status)
+
+    def _salvar_status(self, status):
+        if not isinstance(status, list) or not status or not all(isinstance(s, str) for s in status):
+            raise OrbitError("Lista de status inválida.")
+        novos = [" ".join(s.split()) for s in status]
+        if not all(novos):
+            raise OrbitError("O nome do status não pode ficar vazio.")
+        if len({s.casefold() for s in novos}) != len(novos):
+            raise OrbitError("Há status repetidos na lista.")
+        with self._trava_escrita:
+            cfg = self._config_atual_do_disco()
+            sumiram = [s for s in cfg.status if s not in novos]  # remover = renomear
+            if sumiram:
+                uso = self._status_em_uso()
+                bloqueados = [s for s in sumiram if uso.get(s)]
+                if bloqueados:
+                    linhas = []
+                    for s in bloqueados:
+                        docs = uso[s]
+                        linhas.append(f'"{s}": {"; ".join(docs[:10])}'
+                                      + (f" e mais {len(docs) - 10}" if len(docs) > 10 else ""))
+                    raise OrbitError("Não é possível remover nem renomear um status em uso "
+                                     "em revisão atual. " + " | ".join(linhas))
+            cfg.status = novos
+            self._aplicar_config(cfg)
+        return self._get_config()
+
+    def definir_logo_empresa(self) -> dict:
+        return self._chamar(self._definir_logo_empresa)
+
+    def _definir_logo_empresa(self):
+        base = self._exigir_base()
+        if self._janela is None:
+            raise OrbitError("A janela ainda não está pronta.")
+        escolha = self._janela.create_file_dialog(
+            _DIALOGO_ARQUIVO, allow_multiple=False,
+            file_types=("Imagens (*.png;*.jpg;*.jpeg;*.svg;*.webp)",))
+        if not escolha:
+            return None  # cancelado
+        origem = Path(escolha if isinstance(escolha, str) else escolha[0])
+        ext = origem.suffix.lower()
+        if ext not in EXT_LOGO:
+            raise OrbitError("Formato de imagem não aceito. Use " + ", ".join(EXT_LOGO) + ".")
+        if not origem.is_file():
+            raise OrbitError(f"Arquivo não encontrado: {origem}")
+        if origem.stat().st_size > TAMANHO_MAX_LOGO:
+            raise OrbitError("A imagem é grande demais (máximo de 5 MB).")
+        pasta = base / ".orbit"
+        nome = f"{PREFIXO_LOGO}{ext}"
+        destino = pasta / nome
+        with self._trava_escrita:
+            cfg = self._config_atual_do_disco()
+            pasta.mkdir(parents=True, exist_ok=True)
+            if not (destino.exists() and origem.resolve() == destino.resolve()):
+                tmp = pasta / f"{nome}.tmp"
+                try:
+                    shutil.copyfile(origem, tmp)  # cópia: o original nunca é movido
+                    os.replace(tmp, destino)
+                finally:
+                    tmp.unlink(missing_ok=True)  # resto da nossa própria cópia temporária
+            cfg.logo_empresa = nome
+            self._aplicar_config(cfg)
+            # só depois de o novo estar gravado: cópias antigas do Orbit com outra extensão
+            for velho in pasta.glob(f"{PREFIXO_LOGO}.*"):
+                if velho.name.lower() != nome.lower() and velho.suffix.lower() in EXT_LOGO:
+                    try:
+                        velho.unlink()
+                    except OSError:
+                        pass
+        return {"logo_url": self._logo_url()}
 
     # --- clientes e projetos ---------------------------------------------
 

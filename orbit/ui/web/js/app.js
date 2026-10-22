@@ -77,6 +77,19 @@ const SECAO_DA_ROTA = {
   envios: 'envios', config: 'config',
 };
 
+/* Logo da empresa no espaço reservado do cabeçalho. */
+function atualizarLogoEmpresa() {
+  const box = document.getElementById('logo-empresa');
+  if (!box) return;
+  const url = Orbit.config && Orbit.config.logo_url;
+  box.classList.toggle('tem-logo', !!url);
+  if (url) {
+    box.innerHTML = `<img src="${esc(url)}" alt="Logo da empresa">`;
+  } else {
+    box.textContent = 'LOGO';
+  }
+}
+
 function marcarNavegacao(rota) {
   const secao = SECAO_DA_ROTA[rota];
   document.querySelectorAll('#nav a').forEach(a =>
@@ -168,10 +181,12 @@ async function recarregar() {
   aplicarTema(Orbit.settings.tema);
   if (!Orbit.settings.base_ok) {
     Orbit.config = null;
+    atualizarLogoEmpresa();
     telaBoasVindas();
     return;
   }
   Orbit.config = await api('get_config');
+  atualizarLogoEmpresa();
   ativarNavegacao(true);
   if (!location.hash) location.hash = '#/clientes';
   await renderizar();
