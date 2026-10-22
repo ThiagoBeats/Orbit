@@ -1,0 +1,121 @@
+/* Orbit — visual base (rascunho aprovado: visual-v2.html, spec §9) */
+
+@font-face { font-family: 'Roboto'; font-style: normal; font-weight: 300; font-display: block; src: url('../fonts/roboto-300.woff2') format('woff2'); }
+@font-face { font-family: 'Roboto'; font-style: normal; font-weight: 400; font-display: block; src: url('../fonts/roboto-400.woff2') format('woff2'); }
+@font-face { font-family: 'Roboto'; font-style: normal; font-weight: 500; font-display: block; src: url('../fonts/roboto-500.woff2') format('woff2'); }
+
+/* ---- Temas ---------------------------------------------------------- */
+:root {
+  --bg:#1b2129; --surface:#232b35; --surface2:#2a333f; --line:#38434f;
+  --text:#e4e8ee; --muted:#93a0b0; --accent:#7fa7d9; --accent-text:#14202e;
+  --ok:#8cc5a3; --warn:#e2c07f; --info:#9fb8e0; --pend:#c99a9a;
+  --overlay:rgba(10,14,20,.6); --shadow:0 20px 50px rgba(0,0,0,.35);
+  --logo-folha:#e4e8ee; --logo-dobra:#93a0b0; --logo-linha:#232b35; --logo-orbita:#7fa7d9;
+}
+body.light {
+  --bg:#eef1f5; --surface:#ffffff; --surface2:#f5f7fa; --line:#d6dce4;
+  --text:#26313d; --muted:#6c7988; --accent:#4f7cb3; --accent-text:#ffffff;
+  --ok:#3f8f63; --warn:#b48a2e; --info:#4f7cb3; --pend:#a65d5d;
+  --overlay:rgba(38,49,61,.35); --shadow:0 20px 50px rgba(38,49,61,.18);
+  --logo-folha:#26313d; --logo-dobra:#6c7988; --logo-linha:#ffffff; --logo-orbita:#4f7cb3;
+}
+
+/* ---- Base ----------------------------------------------------------- */
+* { box-sizing:border-box; margin:0; padding:0; }
+html, body { height:100%; }
+body { background:var(--bg); color:var(--text); font-family:'Roboto','Segoe UI',sans-serif; font-weight:400; letter-spacing:.01em; font-size:14px; }
+a { color:var(--accent); }
+.oculto { display:none !important; }
+
+/* ---- Cabeçalho ------------------------------------------------------ */
+header { display:flex; align-items:center; justify-content:space-between; gap:24px; padding:16px 32px; background:var(--surface); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:10; }
+.logo { display:flex; align-items:center; gap:12px; }
+.logo .marca { width:28px; height:28px; display:flex; }
+.logo .marca svg, .logo .marca img { width:28px; height:28px; display:block; }
+.logo .name { font-weight:500; letter-spacing:.2em; font-size:14px; }
+.logo .box { width:110px; height:34px; border:1px dashed var(--line); border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--muted); letter-spacing:.1em; margin-left:12px; overflow:hidden; }
+.logo .box img { max-width:100%; max-height:100%; object-fit:contain; }
+.logo .box.tem-logo { border:none; }
+.direita { display:flex; align-items:center; gap:16px; }
+nav { display:flex; align-items:center; }
+nav a { color:var(--muted); text-decoration:none; font-size:12px; letter-spacing:.14em; margin-left:24px; padding:8px 12px; border-radius:8px; text-transform:uppercase; border:1px solid transparent; transition:border-color .2s; }
+nav a:hover { border-color:var(--line); }
+nav a.on { color:var(--text); background:var(--surface2); }
+nav.desativada a { opacity:.4; pointer-events:none; }
+.conexao { min-width:24px; min-height:24px; display:flex; align-items:center; } /* indicador de conexão: Tarefa 16 */
+
+/* ---- Tipografia de página -------------------------------------------- */
+#conteudo { padding-bottom:40px; }
+#conteudo:has(> .boas-vindas) { padding-bottom:0; }
+.crumb { padding:28px 32px 6px; font-size:12px; letter-spacing:.16em; color:var(--muted); text-transform:uppercase; }
+.crumb a { color:var(--muted); text-decoration:none; }
+.crumb a:hover { color:var(--text); }
+h1 { padding:0 32px; font-weight:400; font-size:30px; letter-spacing:.04em; text-transform:uppercase; }
+.pagina { padding:20px 32px; }
+.secao-titulo { font-size:12px; letter-spacing:.16em; color:var(--muted); text-transform:uppercase; font-weight:500; margin:24px 0 10px; }
+.texto-sec { color:var(--muted); font-size:13px; line-height:1.6; }
+
+/* ---- Blocos de resumo ------------------------------------------------- */
+.stats { display:flex; gap:14px; padding:20px 32px; flex-wrap:wrap; }
+.stat { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:14px 20px; min-width:150px; }
+.stat .v { font-size:24px; font-weight:300; }
+.stat .l { font-size:11px; letter-spacing:.16em; color:var(--muted); text-transform:uppercase; margin-top:4px; }
+
+/* ---- Painel / cartões ------------------------------------------------- */
+main.painel { display:flex; gap:20px; padding:4px 32px 40px; }
+.grid { flex:1.1; display:grid; grid-template-columns:1fr 1fr; gap:12px; align-content:start; }
+.card { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:16px; cursor:pointer; transition:border-color .2s; }
+.card:hover, .card.sel { border-color:var(--accent); }
+.card .t { font-size:12px; letter-spacing:.12em; text-transform:uppercase; font-weight:500; }
+.card .rev { font-size:24px; font-weight:300; margin-top:8px; }
+.card .m { font-size:13px; color:var(--muted); margin-top:8px; display:flex; align-items:center; gap:8px; }
+.card.na { opacity:.4; }
+.card.pend { border-style:dashed; }
+.chip { font-size:11px; padding:3px 9px; border-radius:20px; background:var(--surface2); border:1px solid var(--line); }
+.chip.ok { color:var(--ok); } .chip.warn { color:var(--warn); } .chip.info { color:var(--info); } .chip.pend { color:var(--pend); }
+.viewer { flex:1; background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:16px; }
+.pdf { height:300px; border-radius:8px; background:var(--surface2); display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:12px; letter-spacing:.16em; text-transform:uppercase; }
+.hist { margin-top:16px; font-size:13px; color:var(--muted); line-height:1.9; }
+.hist b { color:var(--text); font-weight:500; }
+
+/* ---- Botões e campos -------------------------------------------------- */
+.btn { display:inline-block; border:1px solid var(--line); color:var(--text); background:var(--surface2); padding:10px 18px; border-radius:8px; font-family:inherit; font-size:12px; letter-spacing:.12em; text-transform:uppercase; cursor:pointer; margin-top:14px; margin-right:6px; transition:border-color .2s; }
+.btn:hover { border-color:var(--accent); }
+.btn.solid { background:var(--accent); border-color:var(--accent); color:var(--accent-text); }
+.btn:disabled { opacity:.5; cursor:default; }
+.field { margin-top:16px; }
+.field label { display:block; font-size:11px; letter-spacing:.16em; color:var(--muted); text-transform:uppercase; margin-bottom:6px; }
+.field .in, .field input, .field select, .field textarea { width:100%; background:var(--surface2); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-family:inherit; font-size:14px; color:var(--text); outline:none; transition:border-color .2s; }
+.field input:focus, .field select:focus, .field textarea:focus { border-color:var(--accent); }
+.field .in.preview { color:var(--accent); }
+
+/* ---- Seletor (ex.: tema) ---------------------------------------------- */
+.opcoes { display:flex; gap:10px; flex-wrap:wrap; }
+.opcao { border:1px solid var(--line); background:var(--surface); border-radius:12px; padding:14px 18px; min-width:180px; cursor:pointer; transition:border-color .2s; }
+.opcao:hover { border-color:var(--muted); }
+.opcao.on { border-color:var(--accent); }
+.opcao .t { font-size:12px; letter-spacing:.12em; text-transform:uppercase; font-weight:500; }
+.opcao .d { font-size:13px; color:var(--muted); margin-top:6px; }
+.bloco { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:16px 20px; }
+.caminho { font-size:14px; word-break:break-all; }
+
+/* ---- Boas-vindas ------------------------------------------------------- */
+.boas-vindas { min-height:calc(100vh - 67px); display:flex; align-items:center; justify-content:center; padding:32px; }
+.boas-vindas .caixa { max-width:520px; text-align:center; }
+.boas-vindas .simbolo { width:96px; height:96px; margin:0 auto 24px; }
+.boas-vindas .simbolo svg, .boas-vindas .simbolo img { width:96px; height:96px; }
+.boas-vindas h1 { padding:0; }
+.boas-vindas p { color:var(--muted); font-size:14px; line-height:1.7; margin-top:14px; }
+.boas-vindas .aviso { color:var(--pend); }
+.boas-vindas .btn { margin-top:28px; }
+
+/* ---- Popups ------------------------------------------------------------ */
+.overlay { position:fixed; inset:0; background:var(--overlay); display:flex; align-items:center; justify-content:center; z-index:100; padding:24px; }
+.modal { width:460px; max-width:100%; max-height:calc(100vh - 48px); overflow:auto; background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:28px; box-shadow:var(--shadow); }
+.modal h2 { font-size:15px; letter-spacing:.16em; text-transform:uppercase; font-weight:500; }
+.modal .sub { color:var(--muted); font-size:13px; margin-top:6px; }
+.modal .corpo { margin-top:12px; font-size:14px; line-height:1.6; }
+.modal .botoes { margin-top:8px; }
+.modal.erro h2 { color:var(--pend); }
+.close { float:right; color:var(--muted); cursor:pointer; font-size:12px; letter-spacing:.1em; background:none; border:none; font-family:inherit; }
+.close:hover { color:var(--text); }

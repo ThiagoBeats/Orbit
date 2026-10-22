@@ -1,0 +1,191 @@
+/* Orbit — núcleo da interface: chamada à Api, tema, cabeçalho e roteador por hash.
+ *
+ * api(nome, ...args)
+ *   Chama window.pywebview.api[nome]. Em sucesso devolve "dados". Se a Api
+ *   responder {ok:false}, mostra o popup de erro e lança ErroApi (que o resto
+ *   do código pode ignorar: o usuário já foi avisado).
+ *
+ * Telas: cada arquivo em js/views/ registra Orbit.views[nome] = async (el, id) => {...}
+ *   Rotas: #/clientes  #/cliente/<id>  #/projeto/<id>  #/maquinas  #/maquina/<id>
+ *          #/envios  #/config
+ */
+
+const Orbit = window.Orbit = {
+  views: {},
+  settings: null,   // resposta de get_settings
+  config: null,     // resposta de get_config (config compartilhada)
+};
+
+async function api(nome, ...args) {
+  const ponte = window.pywebview && window.pywebview.api;
+  if (!ponte || typeof ponte[nome] !== 'function') {
+    mostrarErro(`Função indisponível na Api: ${nome}`);
+    throw new ErroApi(nome);
+  }
+  let r;
+  try {
+    r = await ponte[nome](...args);
+  } catch (e) {
+    mostrarErro(`Falha de comunicação com o Orbit: ${e && e.message ? e.message : e}`);
+    throw new ErroApi(String(e));
+  }
+  if (!r || !r.ok) {
+    const msg = (r && r.erro) || 'Erro desconhecido.';
+    mostrarErro(msg);
+    throw new ErroApi(msg);
+  }
+  return r.dados;
+}
+
+window.addEventListener('unhandledrejection', e => {
+  if (e.reason instanceof ErroApi) e.preventDefault(); // já mostrado ao usuário
+});
+
+/* ---- Tema ------------------------------------------------------------ */
+
+function aplicarTema(tema) {
+  document.body.classList.toggle('light', tema === 'claro');
+}
+
+/* ---- Logo (embutida no HTML para seguir as cores do tema) ------------- */
+
+let _svgLogo = null;
+let _contLogo = 0;
+
+async function carregarLogo() {
+  try {
+    const r = await fetch('img/orbit-logo.svg');
+    if (r.ok) _svgLogo = await r.text();
+  } catch (e) { /* fica a <img> */ }
+  embutirLogos();
+}
+
+function embutirLogos(raiz = document) {
+  if (!_svgLogo) return;
+  raiz.querySelectorAll('[data-logo-orbit]').forEach(el => {
+    const id = `orbit-frente-${++_contLogo}`;
+    el.innerHTML = _svgLogo.replaceAll('orbit-frente', id);
+    el.removeAttribute('data-logo-orbit');
+  });
+}
+
+/* ---- Cabeçalho -------------------------------------------------------- */
+
+const SECAO_DA_ROTA = {
+  clientes: 'clientes', cliente: 'clientes', projeto: 'clientes',
+  maquinas: 'maquinas', maquina: 'maquinas',
+  envios: 'envios', config: 'config',
+};
+
+function marcarNavegacao(rota) {
+  const secao = SECAO_DA_ROTA[rota];
+  document.querySelectorAll('#nav a').forEach(a =>
+    a.classList.toggle('on', a.dataset.secao === secao));
+}
+
+function ativarNavegacao(ativa) {
+  document.getElementById('nav').classList.toggle('desativada', !ativa);
+}
+
+/* ---- Roteador --------------------------------------------------------- */
+
+const TITULOS = {
+  clientes: 'Clientes', cliente: 'Cliente', projeto: 'Projeto',
+  maquinas: 'Máquinas Padrão', maquina: 'Máquina', envios: 'Envios', config: 'Configurações',
+};
+
+function lerRota() {
+  const partes = location.hash.replace(/^#\/?/, '').split('/');
+  const nome = partes[0] || 'clientes';
+  const id = partes.length > 1 ? decodeURIComponent(partes.slice(1).join('/')) : null;
+  return { nome: TITULOS[nome] ? nome : 'clientes', id };
+}
+
+function irPara(hash) {
+  if (location.hash === hash) renderizar(); else location.hash = hash;
+}
+
+let _renderizacao = 0;
+
+async function renderizar() {
+  if (!Orbit.settings || !Orbit.settings.base_ok) return;
+  const { nome, id } = lerRota();
+  marcarNavegacao(nome);
+  const el = document.getElementById('conteudo');
+  const minha = ++_renderizacao;
+  el.innerHTML = '';
+  const view = Orbit.views[nome] || telaEmConstrucao(nome);
+  try {
+    await view(el, id, () => minha === _renderizacao);
+  } catch (e) {
+    if (!(e instanceof ErroApi)) {
+      console.error(e);
+      mostrarErro(`Erro ao montar a tela: ${e && e.message ? e.message : e}`);
+    }
+  }
+}
+
+function telaEmConstrucao(nome) {
+  return async el => {
+    el.innerHTML = `
+      <div class="crumb">Orbit</div>
+      <h1>${esc(TITULOS[nome])}</h1>
+      <div class="pagina"><p class="texto-sec">Esta tela ainda está em construção.</p></div>`;
+  };
+}
+
+/* ---- Primeira execução: boas-vindas ----------------------------------- */
+
+function telaBoasVindas() {
+  ativarNavegacao(false);
+  marcarNavegacao(null);
+  const erro = Orbit.settings && Orbit.settings.erro_base;
+  const el = document.getElementById('conteudo');
+  el.innerHTML = `
+    <div class="boas-vindas"><div class="caixa">
+      <div class="simbolo" data-logo-orbit><img src="img/orbit-logo.svg" alt=""></div>
+      <h1>Bem-vindo ao Orbit</h1>
+      <p>Para começar, escolha a <b>pasta base</b>: a pasta (local ou na rede) onde ficam
+         os clientes, os projetos e as máquinas padrão. O Orbit cria nela a pasta
+         <b>.orbit</b> com as configurações compartilhadas.</p>
+      ${erro ? `<p class="aviso">${esc(erro)}</p>` : ''}
+      <button type="button" class="btn solid" id="btn-pasta-base">Escolher pasta base</button>
+    </div></div>`;
+  embutirLogos(el);
+  el.querySelector('#btn-pasta-base').addEventListener('click', escolherPastaBase);
+}
+
+async function escolherPastaBase() {
+  const settings = await api('escolher_pasta_base');
+  if (!settings) return; // cancelado
+  await recarregar();
+}
+
+/* ---- Inicialização ----------------------------------------------------- */
+
+async function recarregar() {
+  Orbit.settings = await api('get_settings');
+  aplicarTema(Orbit.settings.tema);
+  if (!Orbit.settings.base_ok) {
+    Orbit.config = null;
+    telaBoasVindas();
+    return;
+  }
+  Orbit.config = await api('get_config');
+  ativarNavegacao(true);
+  if (!location.hash) location.hash = '#/clientes';
+  await renderizar();
+}
+
+window.addEventListener('hashchange', renderizar);
+
+let _iniciado = false;
+function iniciar() {
+  if (_iniciado || !(window.pywebview && window.pywebview.api)) return;
+  _iniciado = true;
+  carregarLogo();
+  recarregar().catch(e => { if (!(e instanceof ErroApi)) console.error(e); });
+}
+
+window.addEventListener('pywebviewready', iniciar);
+window.addEventListener('DOMContentLoaded', iniciar);
