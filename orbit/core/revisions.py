@@ -107,6 +107,42 @@ class _Transacao:
         return falhas
 
 
+def _nomes_finais(repo: Repository, c: Container, tipo_id: str, principal: Path,
+                  editaveis: list[Path], numero: int, data: date) -> tuple[str, list[str]]:
+    """Nomes finais (principal, editáveis) de uma revisão, já encurtados para o limite."""
+    tipo = repo.config.tipo(tipo_id)
+    base = build_base_name(tipo.nome, repo.name_parts(c), data, numero)
+    ext_p = Path(principal).suffix
+    exts_e = [Path(e).suffix for e in editaveis]
+    nome_p, nomes_e = build_file_names(base, ext_p, exts_e)
+    sufixo_longo = max((n[len(base):] for n in [nome_p] + nomes_e), key=len)
+    base = fit_base_name(repo.doc_path(c, tipo_id), base, sufixo_longo, LIMITE_CAMINHO)
+    return build_file_names(base, ext_p, exts_e)
+
+
+def _reerguer_falha(e: BaseException, tx: "_Transacao", acao: str) -> None:
+    """Chamada no `except` de uma transação: desfaz e relança um erro para o usuário.
+
+    `acao` completa a frase "Não foi possível <acao> (...)".
+    """
+    falhas = tx.desfazer()
+    aviso = ""
+    if falhas:
+        aviso = (" ATENÇÃO: não foi possível desfazer tudo; confira manualmente: "
+                 + "; ".join(falhas))
+    if isinstance(e, PermissionError):
+        raise ArquivoEmUso(f"O arquivo {tx.arquivo_atual} está aberto em outro programa. "
+                           f"Feche-o e tente de novo.{aviso}") from e
+    if isinstance(e, OrbitError):
+        if aviso:
+            raise OrbitError(f"{e}{aviso}") from e
+        raise e
+    if isinstance(e, OSError):
+        raise OrbitError(f"Não foi possível {acao} ({tx.arquivo_atual}): "
+                         f"{e}. As alterações foram desfeitas.{aviso}") from e
+    raise e
+
+
 class RevisionService:
     def __init__(self, repo: Repository):
         self.repo = repo
@@ -125,14 +161,7 @@ class RevisionService:
 
     def _nomes(self, c: Container, tipo_id: str, principal: Path, editaveis: list[Path],
                numero: int, data: date) -> tuple[str, list[str]]:
-        tipo = self.repo.config.tipo(tipo_id)
-        base = build_base_name(tipo.nome, self.repo.name_parts(c), data, numero)
-        ext_p = Path(principal).suffix
-        exts_e = [Path(e).suffix for e in editaveis]
-        nome_p, nomes_e = build_file_names(base, ext_p, exts_e)
-        sufixo_longo = max((n[len(base):] for n in [nome_p] + nomes_e), key=len)
-        base = fit_base_name(self.repo.doc_path(c, tipo_id), base, sufixo_longo, LIMITE_CAMINHO)
-        return build_file_names(base, ext_p, exts_e)
+        return _nomes_finais(self.repo, c, tipo_id, principal, editaveis, numero, data)
 
     def _numero(self, c: Container, tipo_id: str, numero: int | None) -> int:
         return self.sugerir_numero(c, tipo_id) if numero is None else numero
@@ -220,22 +249,7 @@ class RevisionService:
                                                  "motivo": motivo}))
             self.repo.save_container(c)
         except BaseException as e:
-            falhas = tx.desfazer()
-            aviso = ""
-            if falhas:
-                aviso = (" ATENÇÃO: não foi possível desfazer tudo; confira manualmente: "
-                         + "; ".join(falhas))
-            if isinstance(e, PermissionError):
-                raise ArquivoEmUso(f"O arquivo {tx.arquivo_atual} está aberto em outro programa. "
-                                   f"Feche-o e tente de novo.{aviso}") from e
-            if isinstance(e, OrbitError):
-                if aviso:
-                    raise OrbitError(f"{e}{aviso}") from e
-                raise
-            if isinstance(e, OSError):
-                raise OrbitError(f"Não foi possível enviar a revisão ({tx.arquivo_atual}): "
-                                 f"{e}. As alterações foram desfeitas.{aviso}") from e
-            raise
+            _reerguer_falha(e, tx, "enviar a revisão")
         return nova
 
     def alterar_status(self, container_id: str, tipo_id: str, status: str) -> Revisao:
