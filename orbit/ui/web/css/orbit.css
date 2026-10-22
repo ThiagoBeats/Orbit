@@ -209,3 +209,21 @@ main.painel { display:flex; gap:20px; padding:4px 32px 40px; }
 .tabela .nowrap { white-space:nowrap; }
 .rev-antiga { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:4px 0; font-size:13px; }
 .secao-revisoes { margin-bottom:16px; padding-bottom:8px; border-bottom:1px solid var(--line); }
+
+/* ---- Importação --------------------------------------------------------- */
+.modal.importacao { width:1040px; }
+.tabela-rolagem { overflow-x:auto; }
+.tabela-import td, .tabela-import th { padding:6px 8px; }
+.tabela-import select, .tabela-import input { width:100%; background:var(--surface2); border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-family:inherit; font-size:13px; color:var(--text); outline:none; }
+.tabela-import .im-rev { width:64px; }
+.tabela-import .im-nome { max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tabela-import tr.im-msg td { padding:4px 8px 8px; font-size:12px; border-bottom:1px solid var(--line); }
+.tabela-import tr.linha-erro td { border-color:var(--pend); }
+.tabela-import tr.linha-erro:not(.im-msg) td { border-bottom:none; border-top:1px solid var(--pend); }
+.tabela-import tr.linha-erro td:first-child { border-left:1px solid var(--pend); }
+.tabela-import tr.linha-erro td:last-child { border-right:1px solid var(--pend); }
+.tabela-import tr.im-msg.linha-erro td { color:var(--pend); background:color-mix(in srgb, var(--pend) 10%, var(--surface)); border-top:none; }
+.acoes-import { display:flex; align-items:center; gap:12px; margin-top:12px; }
+.acoes-import .dica { margin-top:0; }
+.titulo-painel .acoes-titulo { display:flex; gap:8px; }
+#pn-topo.alvo { outline:1px dashed var(--accent); outline-offset:-4px; border-radius:12px; }

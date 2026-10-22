@@ -14,14 +14,6 @@ function _formatarTamanho(bytes) {
   return `${(bytes / 1024 / 1024).toFixed(1).replace('.', ',')} MB`;
 }
 
-function _emBreve(oque) {
-  abrirPopup({
-    titulo: oque,
-    corpoHtml: '<p class="texto-sec">Esta função chega numa próxima etapa do Orbit.</p>',
-    botoes: [{ texto: 'OK', primario: true }],
-  });
-}
-
 function _cartaoDoc(d, P) {
   const a = d.atual;
   const pend = !a && !d.nao_se_aplica;
@@ -85,9 +77,12 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
     const ult = r.ultimo_emitido;
     const n = P.dados.nao_registrados;
     el.innerHTML = `
+      <div id="pn-topo">
       <div class="crumb">${crumb}</div>
       <div class="titulo-painel"><h1>${esc(c.nome)}</h1>
-        <button type="button" class="btn" id="pn-dados">${maquina ? 'Dados da máquina' : 'Dados do projeto'}</button></div>
+        <div class="acoes-titulo">
+          <button type="button" class="btn" id="pn-importar">Importar documentos</button>
+          <button type="button" class="btn" id="pn-dados">${maquina ? 'Dados da máquina' : 'Dados do projeto'}</button></div></div>
       ${n > 0 ? `<div class="faixa-aviso"><span>${n} ${n === 1 ? 'arquivo na pasta não está registrado'
         : 'arquivos na pasta não estão registrados'}</span>
         <button type="button" class="btn pequeno" id="pn-revisar">Revisar</button></div>` : ''}
@@ -95,6 +90,7 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
         <div class="stat"><div class="v">${r.emitidos}/${r.aplicaveis}</div><div class="l">Emitidos</div></div>
         <div class="stat"><div class="v">${esc(formatarDataCurta(r.ultima_atualizacao))}</div><div class="l">Última atualização</div></div>
         <div class="stat"><div class="v">${ult ? `${esc(ult.nome)} ${formatarRev(ult.numero)}` : '—'}</div><div class="l">Último emitido</div></div>
+      </div>
       </div>
       <main class="painel">
         <div class="coluna-cartoes">
@@ -197,6 +193,15 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
   }
   P.novaRevisao = novaRevisao;
 
+  async function importar(caminhos = [], tipoPadrao = null) {
+    const tipos = P.dados.documentos.map(d => ({ tipo_id: d.tipo_id, nome: d.nome }));
+    if (await popupImportacao({ containerId: id, caminhos, tipos, tipoPadrao })) {
+      P.ver = null;
+      await carregar();
+    }
+  }
+  P.importar = importar;
+
   function enviarEmail(selecoes) {
     return popupEmail({ containerId: id, selecoes, nomesTipos: nomesTipos() }).catch(() => {});
   }
@@ -273,7 +278,17 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
       atualizarSelecao();
     });
     const revisar = el.querySelector('#pn-revisar');
-    if (revisar) revisar.addEventListener('click', () => _emBreve('Arquivos não registrados'));
+    if (revisar) revisar.addEventListener('click', async () => {
+      try {
+        if (await popupNaoRegistrados({ containerId: id })) { P.ver = null; await carregar(); }
+      } catch (e) { if (!(e instanceof ErroApi)) console.error(e); }
+    });
+    el.querySelector('#pn-importar').addEventListener('click', async () => {
+      try {
+        const lista = await api('escolher_arquivos', true);
+        if (lista.length) await importar(lista);
+      } catch (e) { if (!(e instanceof ErroApi)) console.error(e); }
+    });
     const dados = el.querySelector('#pn-dados');
     if (dados) dados.addEventListener('click', async () => {
       const salvo = P.dados.container.tipo === 'maquina'
@@ -289,7 +304,8 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
 /* ---- Arrastar e soltar (registrado uma vez) ---------------------------- */
 
 (() => {
-  let alvoDrop = null; // tipo_id do cartão sob o mouse no último drop
+  const TOPO = '#topo'; // alvo especial: área do topo do painel (importação)
+  let alvoDrop = null; // tipo_id do cartão sob o mouse no último drop (ou TOPO)
   const temArquivos = e => e.dataTransfer && [...e.dataTransfer.types].includes('Files');
   const cartaoEm = e => {
     const P = Orbit.painel;
@@ -297,15 +313,23 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
     const c = e.target.closest && e.target.closest('.card.doc');
     return c || null;
   };
-  const limpar = () => document.querySelectorAll('.card.doc.alvo').forEach(x => x.classList.remove('alvo'));
+  const topoEm = e => {
+    const P = Orbit.painel;
+    if (!P || !P.aindaAtual() || Orbit.uploadAberto) return null;
+    return (e.target.closest && e.target.closest('#pn-topo')) || null;
+  };
+  const limpar = () => document.querySelectorAll('.card.doc.alvo, #pn-topo.alvo')
+    .forEach(x => x.classList.remove('alvo'));
 
   document.addEventListener('dragover', e => {
     if (!temArquivos(e)) return;
     e.preventDefault(); // sem isto o drop não acontece
     const c = cartaoEm(e);
-    e.dataTransfer.dropEffect = c || Orbit.uploadAberto ? 'copy' : 'none';
-    document.querySelectorAll('.card.doc.alvo').forEach(x => { if (x !== c) x.classList.remove('alvo'); });
+    const t = c ? null : topoEm(e);
+    e.dataTransfer.dropEffect = c || t || Orbit.uploadAberto ? 'copy' : 'none';
+    document.querySelectorAll('.card.doc.alvo, #pn-topo.alvo').forEach(x => { if (x !== c && x !== t) x.classList.remove('alvo'); });
     if (c) c.classList.add('alvo');
+    if (t) t.classList.add('alvo');
   });
   document.addEventListener('dragleave', e => {
     if (!e.relatedTarget) limpar(); // saiu da janela
@@ -313,7 +337,7 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
   document.addEventListener('drop', e => {
     e.preventDefault(); // nunca deixa o WebView abrir o arquivo
     const c = cartaoEm(e);
-    alvoDrop = c ? c.dataset.tipo : null;
+    alvoDrop = c ? c.dataset.tipo : (topoEm(e) ? TOPO : null);
     limpar();
   });
 
@@ -328,9 +352,10 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
     const P = Orbit.painel;
     if (!alvo || !P || !P.aindaAtual()) return;
     if (!caminhos.length) {
-      mostrarErro('Não foi possível ler o caminho do arquivo arrastado. Use "Nova revisão" e escolha o arquivo.');
+      mostrarErro('Não foi possível ler o caminho do arquivo arrastado. Use "Nova revisão" ou "Importar documentos" e escolha o arquivo.');
       return;
     }
-    P.novaRevisao(alvo, caminhos);
+    if (alvo === TOPO) P.importar(caminhos).catch(() => {});
+    else P.novaRevisao(alvo, caminhos);
   };
 })();

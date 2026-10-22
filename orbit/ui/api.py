@@ -7,11 +7,12 @@ Convenção: todo método público devolve {"ok": True, "dados": ...} ou
 {"ok": False, "erro": "..."}; ver _chamar().
 """
 import os
+import re
 import threading
 import traceback
 import unicodedata
 from dataclasses import asdict
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from orbit.core.config import (TEMAS, load_shared_config, load_user_settings,
@@ -21,7 +22,9 @@ from orbit.core.errors import OrbitDataError, OrbitError
 from orbit.core.identity import current_identity
 from orbit.core.models import Contato, Revisao
 from orbit.core.outlook import OutlookClient
-from orbit.core.reconcile import find_untracked
+from orbit.core.importer import PAPEIS, ImportService, ItemImportacao
+from orbit.core.naming import parse_rev
+from orbit.core.reconcile import find_untracked, register_untracked
 from orbit.core.repository import Repository
 from orbit.core.revisions import PASTA_ANTIGOS, RevisionService
 from orbit.ui.fileserver import FileServer
@@ -47,6 +50,8 @@ def _contatos(lista) -> list[Contato]:
             out.append(Contato(nome, email))
     return out
 
+
+_REV_SOLTO = re.compile(r"REV\s*(\d+)", re.IGNORECASE)
 
 SITUACOES = ("ativo", "concluido")
 
@@ -529,6 +534,143 @@ class Api:
         elif not isinstance(cliente_id, str):
             raise OrbitError("Cliente inválido.")
         return EmailService(repo, self._outlook).listar_envios(cliente_id)
+
+    # --- importação e reconciliação ----------------------------------------------
+
+    def preparar_importacao(self, caminhos) -> dict:
+        return self._chamar(self._preparar_importacao, caminhos)
+
+    def _preparar_importacao(self, caminhos):
+        if not isinstance(caminhos, list) or not all(isinstance(c, str) for c in caminhos):
+            raise OrbitError("Lista de arquivos inválida.")
+        out = []
+        for c in caminhos:
+            f = self._arquivo_origem(c)
+            n = parse_rev(f.name)
+            if n is None:
+                m = _REV_SOLTO.search(f.name)
+                n = int(m.group(1)) if m and int(m.group(1)) <= 99 else None
+            out.append({"origem": str(f), "nome": f.name, "rev_detectada": n,
+                        "data_mtime": date.fromtimestamp(f.stat().st_mtime).isoformat()})
+        return out
+
+    def _arquivo_origem(self, caminho) -> Path:
+        """Arquivo de origem vindo do JS: tem de existir e não pode ser interno do Orbit."""
+        if not isinstance(caminho, str) or not caminho.strip():
+            raise OrbitError("Caminho de arquivo inválido.")
+        f = Path(caminho)
+        if not f.is_file():
+            raise OrbitError(f"Arquivo não encontrado: {caminho}")
+        base = self._exigir_base()
+        try:
+            f.resolve().relative_to((base / ".orbit").resolve())
+        except ValueError:
+            return f
+        raise OrbitError("Não é possível importar arquivos da pasta interna .orbit.")
+
+    def _item_importacao(self, item) -> ItemImportacao:
+        """Valida uma linha do popup; levanta OrbitError com a mensagem da linha."""
+        if not isinstance(item, dict):
+            raise OrbitError("Linha de importação inválida.")
+        origem = self._arquivo_origem(item.get("origem"))
+        tipo, status, papel = item.get("tipo_id"), item.get("status"), item.get("papel")
+        if not isinstance(tipo, str) or not tipo:
+            raise OrbitError("Escolha o tipo de documento.")
+        if not isinstance(status, str) or not status:
+            raise OrbitError("Escolha o status.")
+        if papel not in PAPEIS:
+            raise OrbitError(f"Papel inválido: {papel}")
+        numero = item.get("numero")
+        if numero in (None, ""):
+            raise OrbitError("Informe o número da revisão.")
+        numero = _numero_revisao(numero)
+        data = item.get("data")
+        if data in (None, ""):
+            data = None
+        else:
+            try:
+                if not isinstance(data, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", data):
+                    raise ValueError
+                data = date.fromisoformat(data)
+            except ValueError:
+                raise OrbitError("Data inválida. Use o formato dd/mm/aaaa.")
+        return ItemImportacao(origem, tipo, numero, status, papel,
+                              str(item.get("motivo") or "").strip(), data)
+
+    def validar_importacao(self, container_id, itens) -> dict:
+        return self._chamar(self._validar_importacao, container_id, itens)
+
+    def _validar_importacao(self, container_id, itens):
+        repo = self._exigir_repo()
+        if not isinstance(itens, list):
+            raise OrbitError("Lista de importação inválida.")
+        erros: list = [None] * len(itens)
+        validos: list[ItemImportacao] = []
+        posicoes: list[int] = []
+        for i, it in enumerate(itens):
+            try:
+                validos.append(self._item_importacao(it))
+                posicoes.append(i)
+            except OrbitError as e:
+                erros[i] = str(e)
+        if validos:
+            for i, e in zip(posicoes, ImportService(repo).validar(container_id, validos)):
+                erros[i] = e
+        return erros
+
+    def importar(self, container_id, itens) -> dict:
+        return self._chamar(self._importar, container_id, itens)
+
+    def _importar(self, container_id, itens):
+        repo = self._exigir_repo()
+        if not isinstance(itens, list) or not itens:
+            raise OrbitError("Nenhum arquivo para importar.")
+        lista = []
+        for i, it in enumerate(itens):
+            try:
+                lista.append(self._item_importacao(it))
+            except OrbitError as e:
+                raise OrbitError(f"Linha {i + 1}: {e}")
+        with self._trava_escrita:
+            ImportService(repo).importar(container_id, lista)
+        return None
+
+    def listar_nao_registrados(self, container_id) -> dict:
+        return self._chamar(self._listar_nao_registrados, container_id)
+
+    def _listar_nao_registrados(self, container_id):
+        repo = self._exigir_repo()
+        c = repo.load_container(container_id)
+        nomes = {t.id: t.nome for t in repo.config.tipos}
+        return [{"tipo_id": u.tipo_id, "tipo_nome": nomes.get(u.tipo_id, u.tipo_id),
+                 "nome": u.caminho.name, "numero": u.numero, "arquivado": u.arquivado}
+                for u in find_untracked(repo, c)]
+
+    def registrar(self, container_id, itens, status) -> dict:
+        return self._chamar(self._registrar, container_id, itens, status)
+
+    def _registrar(self, container_id, itens, status):
+        repo = self._exigir_repo()
+        if not isinstance(itens, list) or not itens:
+            raise OrbitError("Selecione ao menos um arquivo para registrar.")
+        if not isinstance(status, str):
+            raise OrbitError(f"Status inválido: {status}")
+        pedidos = set()
+        for it in itens:
+            if (not isinstance(it, dict) or not isinstance(it.get("tipo_id"), str)
+                    or not isinstance(it.get("nome"), str)):
+                raise OrbitError("Arquivo não registrado inválido.")
+            pedidos.add((it["tipo_id"], it["nome"].casefold()))
+        with self._trava_escrita:
+            # o caminho nunca vem do JS: refaz a busca e casa por (tipo, nome)
+            c = repo.load_container(container_id)
+            achados = [u for u in find_untracked(repo, c)
+                       if (u.tipo_id, u.caminho.name.casefold()) in pedidos]
+            if {(u.tipo_id, u.caminho.name.casefold()) for u in achados} != pedidos:
+                raise OrbitError("Algum arquivo não está mais na lista de não registrados. "
+                                 "Atualize e tente de novo.")
+            register_untracked(repo, container_id, achados, status)
+        return None
 
 
 class _OutlookAmigavel:
