@@ -259,3 +259,135 @@ def test_importacao_trava_todos_os_tipos(repo, ctx, relogio):
     svc.importar(p.id, itens)
     assert _travas(cdir) == []
     assert repo.load_container(p.id).documentos[TIPO2].atual.numero == 0
+
+
+# ---------- dono da trava, retentativas e corridas (fix round 1) ----------
+
+import orbit.core.presence as presence_mod  # noqa: E402
+
+
+@pytest.fixture
+def sem_espera(monkeypatch):
+    monkeypatch.setattr(presence_mod, "_ESPERA_S", 0)
+
+
+def _token(lock: Path) -> str:
+    return json.loads(lock.read_text(encoding="utf-8"))["token"]
+
+
+def test_liberar_nao_apaga_trava_de_outro_dono(tmp_path, relogio):
+    a = _svc("fulano", "PC-XYZ", relogio)
+    b = _svc("thiago", "PC1", relogio)
+    trava_a = a.travar(tmp_path, TIPO)
+    assert _token(trava_a) == trava_a.token
+    relogio.avancar(601)  # o upload de A demorou: B libera à força e trava de novo
+    assert b.liberar_abandonada(trava_a) is True
+    trava_b = b.travar(tmp_path, TIPO)
+    assert a.liberar(trava_a) is False  # o finally de A não apaga a trava de B
+    assert trava_b.exists() and _token(trava_b) == trava_b.token
+    assert [f.name for f in trava_b.parent.iterdir()] == [f"{TIPO}.lock"]
+    assert b.liberar(trava_b) is True
+    assert not trava_b.exists()
+    with pytest.raises(TypeError):
+        b.liberar(Path(trava_b))  # sem token não libera
+
+
+def test_liberar_abandonada_so_se_abandonada(tmp_path, relogio):
+    a = _svc("fulano", "PC-XYZ", relogio)
+    trava = a.travar(tmp_path, TIPO)
+    relogio.avancar(600)
+    assert a.liberar_abandonada(trava) is False
+    assert trava.exists()
+    relogio.avancar(1)
+    assert a.liberar_abandonada(trava) is True
+    assert not trava.exists()
+    assert a.liberar_abandonada(trava) is True  # já não existe
+
+
+def test_liberar_tenta_de_novo_se_arquivo_em_uso(tmp_path, relogio, monkeypatch, sem_espera):
+    a = _svc("fulano", "PC-XYZ", relogio)
+    trava = a.travar(tmp_path, TIPO)
+    real, chamadas = os.rename, []
+
+    def rename(origem, destino):
+        chamadas.append(origem)
+        if len(chamadas) <= 2:
+            raise PermissionError(32, "em uso")
+        return real(origem, destino)
+    monkeypatch.setattr(presence_mod.os, "rename", rename)
+    assert a.liberar(trava) is True
+    assert len(chamadas) == 3
+    assert not trava.exists()
+
+
+def test_liberar_falha_final_e_registrada(tmp_path, relogio, monkeypatch, sem_espera):
+    erros = []
+    a = PresenceService(Identity("fulano", "PC-XYZ"), agora=relogio, registrar=erros.append)
+    trava = a.travar(tmp_path, TIPO)
+
+    def rename(origem, destino):
+        raise PermissionError(32, "em uso")
+    monkeypatch.setattr(presence_mod.os, "rename", rename)
+    with pytest.raises(OrbitError, match="Não foi possível liberar a trava"):
+        a.liberar(trava)
+    falhas = a.liberar_varios([trava])  # não lança: só devolve e registra
+    assert len(falhas) == 1 and f"{TIPO}.lock" in falhas[0]
+    assert len(erros) == 1 and isinstance(erros[0], OrbitError)
+    monkeypatch.undo()
+    assert trava.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="bloqueio de exclusão é do Windows")
+def test_leitor_com_arquivo_aberto_nao_impede_liberar(tmp_path, relogio, monkeypatch):
+    import threading
+    monkeypatch.setattr(presence_mod, "_ESPERA_S", 0.05)
+    a = _svc("fulano", "PC-XYZ", relogio)
+    trava = a.travar(tmp_path, TIPO)
+    # a leitura do Orbit compartilha exclusão: não atrapalha o rename
+    assert a.trava_abandonada(trava) is False
+    # um open() comum (sem FILE_SHARE_DELETE) bloqueia; a retentativa espera ele fechar
+    f = open(trava, "rb")
+    threading.Timer(0.12, f.close).start()
+    assert a.liberar(trava) is True
+    assert not trava.exists()
+
+
+def test_travar_tenta_de_novo_se_trava_sumiu(tmp_path, relogio, monkeypatch):
+    lock = PresenceService.caminho_trava(tmp_path, TIPO)
+    lock.parent.mkdir(parents=True)
+    lock.write_text("{}", encoding="utf-8")
+    original = PresenceService._ler_trava
+
+    def some(caminho):  # a trava some entre o FileExistsError e a leitura
+        Path(caminho).unlink()
+        return None
+    monkeypatch.setattr(PresenceService, "_ler_trava", staticmethod(some))
+    trava = _svc("thiago", "PC1", relogio).travar(tmp_path, TIPO)
+    monkeypatch.setattr(PresenceService, "_ler_trava", staticmethod(original))
+    assert _token(trava) == trava.token
+
+
+def test_travar_erro_de_disco_vira_orbit_error(tmp_path, relogio):
+    (tmp_path / ".orbit").write_text("sou um arquivo", encoding="utf-8")
+    with pytest.raises(OrbitError, match="Não foi possível criar a pasta de travas"):
+        _svc("thiago", "PC1", relogio).travar(tmp_path, TIPO)
+
+
+def test_upload_com_falha_ao_liberar_registra_e_devolve_revisao(repo, ctx, monkeypatch):
+    p, origem, _, cdir = ctx
+    erros = []
+    presenca = PresenceService(repo.identity, registrar=erros.append)
+
+    def falha(self, lock, aceitar):
+        raise OrbitError("Não foi possível liberar a trava x: em uso")
+    monkeypatch.setattr(PresenceService, "_remover_se", falha)
+    rev = RevisionService(repo, presence=presenca).enviar_revisao(
+        p.id, TIPO, _arq(origem, "a.pdf"), [], "Em elaboração", "m")
+    assert rev.numero == 0
+    assert [str(e) for e in erros] == ["Não foi possível liberar a trava x: em uso"]
+    assert PresenceService.caminho_trava(cdir, TIPO).exists()  # ficou presa (10 min)
+    # e a falha ao liberar não esconde o erro original da operação
+    with pytest.raises(OrbitError, match="Status inválido"):
+        RevisionService(repo, presence=presenca).enviar_revisao(
+            p.id, TIPO2, _arq(origem, "b.pdf"), [], "Nada", "m")
+    assert len(erros) == 2

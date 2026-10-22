@@ -87,7 +87,8 @@ class Api:
         self._erro_base: str | None = None
         self._agora = datetime.now  # relógio da presença/travas (testes trocam)
         # containers com presença gravada nesta janela: id -> pasta do container
-        self._presencas: dict[str, Path] = {}
+        self._presencas: dict[str, list] = {}  # id -> [pasta, entradas]
+        self._trava_presenca = threading.RLock()
         # métodos da Api rodam em threads paralelas: uma escrita por vez
         self._trava_escrita = threading.RLock()
         if self._settings.pasta_base:
@@ -458,11 +459,19 @@ class Api:
     # --- presença e travas de upload (spec §12) --------------------------------
 
     def _presenca(self) -> PresenceService:
-        return PresenceService(self._exigir_repo().identity, agora=self._agora)
+        return PresenceService(self._exigir_repo().identity, agora=self._agora,
+                               registrar=self._registrar_erro)
 
     def _pasta_container(self, container_id) -> Path:
         repo = self._exigir_repo()
         return repo.container_path(repo.load_container(str(container_id)))
+
+    # Os métodos da Api rodam em threads paralelas, então as chamadas do JS podem
+    # chegar fora de ordem. `_presencas` guarda id -> [pasta, entradas] e é usado
+    # sempre sob `_trava_presenca`:
+    # - um sinal atrasado depois do último sair não recria a presença;
+    # - num sair/entrar rápido (sair chegando depois do novo entrar), a contagem
+    #   não chega a zero e o registro novo não é apagado.
 
     def entrar_container(self, id) -> dict:
         """Grava a presença e devolve quem mais está com o container aberto."""
@@ -471,8 +480,10 @@ class Api:
     def _entrar_container(self, id):
         pasta = self._pasta_container(id)
         svc = self._presenca()
-        self._presencas[str(id)] = pasta
-        self._sinalizar(svc, pasta)
+        with self._trava_presenca:
+            registro = self._presencas.setdefault(str(id), [pasta, 0])
+            registro[1] += 1
+            self._sinalizar(svc, registro[0])
         try:
             outros = svc.outros(pasta)
         except OSError as e:
@@ -493,27 +504,40 @@ class Api:
         return self._chamar(self._sinalizar_container, id)
 
     def _sinalizar_container(self, id):
-        pasta = self._presencas.get(str(id))
-        # só renova quem entrou: um sinal atrasado depois de sair não recria a presença
-        if pasta is not None:
-            self._sinalizar(self._presenca(), pasta)
+        with self._trava_presenca:
+            registro = self._presencas.get(str(id))
+            if registro is not None:  # só renova quem entrou e ainda não saiu
+                self._sinalizar(self._presenca(), registro[0])
         return None
 
     def sair_container(self, id) -> dict:
         return self._chamar(self._sair_container, id)
 
     def _sair_container(self, id):
-        pasta = self._presencas.pop(str(id), None)
-        if pasta is not None and self._repo is not None:
-            try:
-                self._presenca().sair(pasta)
-            except OSError as e:
-                self._registrar_erro(e)
+        with self._trava_presenca:
+            registro = self._presencas.get(str(id))
+            if registro is None:
+                return None
+            registro[1] -= 1
+            if registro[1] <= 0:
+                del self._presencas[str(id)]
+                self._apagar_presenca(registro[0])
         return None
 
+    def _apagar_presenca(self, pasta: Path) -> None:
+        if self._repo is None:
+            return
+        try:
+            self._presenca().sair(pasta)
+        except OSError as e:
+            self._registrar_erro(e)
+
     def _sair_de_todos(self) -> None:
-        for cid in list(self._presencas):
-            self._sair_container(cid)
+        with self._trava_presenca:
+            registros = list(self._presencas.values())
+            self._presencas.clear()
+            for pasta, _ in registros:
+                self._apagar_presenca(pasta)
 
     def ao_fechar_janela(self) -> None:
         """Handler de window.events.closing: apaga as presenças desta janela."""
@@ -525,7 +549,12 @@ class Api:
     ao_fechar_janela._serializable = False
 
     def liberar_trava(self, id, tipo_id) -> dict:
-        """Remove a trava de upload, mas só se ela estiver abandonada (> 10 min)."""
+        """Remove a trava de upload, mas só se ela estiver abandonada (> 10 min).
+
+        A idade é conferida de novo no arquivo que de fato é removido
+        (PresenceService.liberar_abandonada), então uma trava nova criada no
+        meio-tempo não é apagada.
+        """
         return self._chamar(self._liberar_trava, id, tipo_id)
 
     def _liberar_trava(self, id, tipo_id):
@@ -535,15 +564,9 @@ class Api:
             raise OrbitError(f"Tipo de documento não encontrado: {tipo_id}")
         svc = self._presenca()
         lock = svc.caminho_trava(repo.container_path(c), str(tipo_id))
-        if not lock.exists():
-            return None  # já liberada
-        if not svc.trava_abandonada(lock):
+        if not svc.liberar_abandonada(lock):
             raise OrbitError("A trava ainda está em uso (tem menos de 10 minutos) e não "
                              "pode ser liberada.")
-        try:
-            svc.liberar(lock)
-        except OSError as e:
-            raise OrbitError(f"Não foi possível liberar a trava: {e}")
         return None
 
     def obter_painel(self, container_id) -> dict:

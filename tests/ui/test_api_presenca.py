@@ -104,3 +104,31 @@ def test_importar_com_trava(ctx):
 def test_liberar_trava_tipo_invalido(ctx):
     api, pid, *_ = ctx
     assert api.liberar_trava(pid, "../x")["ok"] is False
+
+
+def test_entrar_sair_fora_de_ordem_nao_apaga_registro_novo(ctx):
+    api, pid, cdir, relogio, _ = ctx
+    api.entrar_container(pid)
+    # o JS saiu e voltou rápido; o "entrar" novo chegou antes do "sair" antigo
+    api.entrar_container(pid)
+    api.sair_container(pid)
+    assert len(_minha_presenca(cdir)) == 1
+    api.sinalizar_container(pid)
+    api.sair_container(pid)
+    assert _minha_presenca(cdir) == []
+    api.sinalizar_container(pid)  # sinal atrasado
+    api.sair_container(pid)  # sair a mais não quebra
+    assert _minha_presenca(cdir) == []
+
+
+def test_falha_ao_liberar_trava_vai_para_o_log(ctx, monkeypatch, tmp_path):
+    api, pid, cdir, relogio, origem = ctx
+    from orbit.core.errors import OrbitError
+
+    def falha(self, lock, aceitar):
+        raise OrbitError("Não foi possível liberar a trava teste: em uso")
+    monkeypatch.setattr(PresenceService, "_remover_se", falha)
+    r = api.enviar_revisao(pid, TIPO, str(origem / "a.pdf"), [], "Em elaboração", "m")
+    assert r["ok"] is True
+    log = (tmp_path / "appdata" / "orbit.log").read_text(encoding="utf-8")
+    assert "Não foi possível liberar a trava teste" in log
