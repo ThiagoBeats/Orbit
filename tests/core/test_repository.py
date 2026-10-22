@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from orbit.core.config import add_tipo
@@ -155,3 +157,51 @@ def test_contatos_e_cnpj(repo):
     cli = repo.create_cliente("C", "12.345", [Contato("Ana", "a@x.com")])
     got = repo.get_cliente(cli.id)
     assert got.cnpj == "12.345" and got.contatos[0].email == "a@x.com"
+
+
+def test_nomes_muito_longos_sao_limitados(repo, tmp_path):
+    import shutil, tempfile
+    from orbit.core.repository import Repository
+    base = Path(tempfile.mkdtemp(prefix="ob", dir=tmp_path.anchor))  # base curta: evita o limite de 260 do Windows
+    try:
+        _longos(Repository(base, repo.identity, repo.config))
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def test_caminho_longo_demais_vira_orbiterror(repo, tmp_path):
+    cli = repo.create_cliente("C" * 60)
+    with pytest.raises(OrbitError):
+        repo.create_projeto(cli.id, "1" * 60, "N" * 300)
+
+
+def _longos(repo):
+    cli = repo.create_cliente("C" * 300)
+    p = repo.create_projeto(cli.id, "001", "N" * 300)
+    m = repo.create_maquina("M", "X" * 300)
+    for c in (p, m):
+        assert len(c.pasta) <= 60 and repo.container_path(c).is_dir()
+    assert len(cli.pasta) <= 60
+    assert len(repo.container_path(p).parent.name) <= 60
+
+
+def test_nome_so_de_separadores_da_erro(repo):
+    with pytest.raises(OrbitError):
+        repo.create_cliente(" . ")
+
+
+def test_json_nao_objeto_vira_erro_na_lista(repo):
+    cli = repo.create_cliente("C"); a = repo.create_projeto(cli.id, "1", "A"); b = repo.create_projeto(cli.id, "2", "B")
+    (repo.container_path(a) / "projeto.json").write_text("[]", encoding="utf-8")
+    resumos = repo.list_projetos(cli.id)
+    assert sum(1 for r in resumos if r.erro) == 1
+    repo._idx_containers.clear()
+    assert repo.load_container(b.id).id == b.id
+
+
+def test_lista_projetos_com_pasta_do_cliente_removida(repo):
+    import shutil
+    cli = repo.create_cliente("C")
+    shutil.rmtree(repo.base / "Clientes" / "C" )
+    with pytest.raises(OrbitError):
+        repo.list_projetos(cli.id)

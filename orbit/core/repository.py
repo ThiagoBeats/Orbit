@@ -20,6 +20,8 @@ ARQ_CLIENTE = "cliente.json"
 ARQ_PROJETO = "projeto.json"
 ARQ_MAQUINA = "maquina.json"
 
+LIMITE_PASTA = 60
+
 CAMPOS_EDITAVEIS = ("codigo", "nome", "pedido", "responsavel", "descricao", "situacao", "contatos")
 
 
@@ -59,6 +61,13 @@ class Repository:
         nome = sanitize(texto)
         if not nome:
             raise OrbitError(f"Informe {rotulo}.")
+        return Repository._limitar(nome, rotulo)
+
+    @staticmethod
+    def _limitar(nome: str, rotulo: str) -> str:
+        nome = nome[:LIMITE_PASTA].rstrip(" .-")
+        if not nome:
+            raise OrbitError(f"Informe {rotulo} válido.")
         return nome
 
     @staticmethod
@@ -69,13 +78,16 @@ class Repository:
         except FileExistsError:
             raise OrbitError(f"Já existe uma pasta para {descricao} com este nome ({pasta.name}). "
                              "Escolha outro nome.")
+        except OSError as e:
+            raise OrbitError(f"Não foi possível criar a pasta de {descricao} ({pasta.name}): {e}")
 
     @staticmethod
     def _raw_id(path: Path) -> str | None:
         try:
-            i = read_json(path).get("id")
+            dados = read_json(path)
         except OrbitDataError:
             return None
+        i = dados.get("id") if isinstance(dados, dict) else None
         return i if isinstance(i, str) else None
 
     # ---------- índices id -> caminho ----------
@@ -160,7 +172,11 @@ class Repository:
         self._criar_pasta(raiz, "o projeto" if c.tipo == "projeto" else "a máquina")
         for t in self.config.tipos_ativos():
             c.documentos[t.id] = Documento(t.id, t.pasta)
-            (raiz / t.pasta / "Antigos").mkdir(parents=True, exist_ok=True)
+            try:
+                (raiz / t.pasta / "Antigos").mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                raise OrbitError(f"Não foi possível criar a pasta \"{t.pasta}\" em {raiz.name} "
+                                 f"(caminho longo demais?): {e}")
         caminho = raiz / _arquivo_de(c.tipo)
         write_json_atomic(caminho, c.to_dict())
         self._idx_containers[c.id] = caminho
@@ -174,7 +190,7 @@ class Repository:
         cliente = self.get_cliente(cliente_id)
         cod = self._nome_pasta(codigo, "o código do projeto")
         nm = self._nome_pasta(nome, "o nome do projeto")
-        pasta = f"{cod} - {nm}"
+        pasta = self._limitar(f"{cod} - {nm}", "o nome do projeto")
         c = Container(uuid4().hex, "projeto", codigo.strip(), nome.strip(), pasta,
                       cliente_id=cliente.id, pedido=pedido, responsavel=responsavel,
                       contatos=list(contatos or []))
@@ -263,7 +279,7 @@ class Repository:
             caminho = pasta / arquivo
             try:
                 c = self._load_path(caminho)
-            except OrbitError as e:
+            except (OrbitError, OSError) as e:
                 out.append(ContainerResumo("", pasta.name, "", "", 0, 0, None, str(e)))
                 continue
             self._idx_containers[c.id] = caminho
@@ -272,7 +288,8 @@ class Repository:
 
     def list_projetos(self, cliente_id: str) -> list[ContainerResumo]:
         raiz = self._pasta_cliente(self.get_cliente(cliente_id))
-        return self._resumos([p for p in raiz.iterdir() if p.is_dir()], ARQ_PROJETO)
+        pastas = [p for p in raiz.iterdir() if p.is_dir()] if raiz.is_dir() else []
+        return self._resumos(pastas, ARQ_PROJETO)
 
     def list_maquinas(self) -> list[ContainerResumo]:
         raiz = self.base / PASTA_MAQUINAS
