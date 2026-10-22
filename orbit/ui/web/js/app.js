@@ -170,6 +170,83 @@ function ativarNavegacao(ativa) {
   document.getElementById('nav').classList.toggle('desativada', !ativa);
 }
 
+/* ---- Teste de conexão (spec §12) ---------------------------------------- */
+
+let _testandoConexao = false;
+let _popupFalhaConexao = null;
+
+function _pintarIndicador(r, testando) {
+  const box = document.getElementById('conexao');
+  if (!box) return;
+  const cls = testando ? 'testando' : (r ? (r.ok ? 'ok' : 'falha') : '');
+  const texto = testando ? 'Testando…' : (r ? (r.ok ? 'Conectado' : 'Sem acesso') : '');
+  box.innerHTML = r || testando
+    ? `<button type="button" class="ind ${cls}" id="btn-conexao" title="Testar conexão com a pasta base"><span class="ponto"></span>${esc(texto)}</button>`
+    : '';
+  const b = document.getElementById('btn-conexao');
+  if (b) b.addEventListener('click', () => testarConexao({ detalhe: true }));
+}
+
+/* Roda o teste e atualiza o indicador. Só um teste por vez (cliques extras são ignorados).
+ * opcoes.falha: popup de falha (abertura); opcoes.detalhe: popup de detalhe (clique). */
+async function testarConexao({ falha = false, detalhe = false } = {}) {
+  if (_testandoConexao) return;
+  _testandoConexao = true;
+  _pintarIndicador(Orbit.conexao, true);
+  let r = null;
+  try {
+    const lista = await api('testar_conexao');
+    r = lista && lista[0];
+  } catch (e) {
+    if (!(e instanceof ErroApi)) console.error(e);
+  } finally {
+    _testandoConexao = false;
+  }
+  Orbit.conexao = r;
+  _pintarIndicador(r, false);
+  if (!r) return;
+  if (r.ok) {
+    if (_popupFalhaConexao) _popupFalhaConexao.fechar();
+    if (detalhe) mostrarDetalheConexao(r);
+  } else if (detalhe) {
+    mostrarDetalheConexao(r);
+  } else if (falha) {
+    mostrarFalhaConexao(r);
+  }
+}
+
+function mostrarFalhaConexao(r) {
+  if (_popupFalhaConexao) _popupFalhaConexao.fechar();
+  const p = _popupFalhaConexao = abrirPopup({
+    titulo: 'Sem acesso à pasta base',
+    corpoHtml: `<p>Não foi possível acessar a pasta base ${esc(r.pasta)}: ${esc(r.erro || 'erro desconhecido')}</p>`,
+    botoes: [
+      { texto: 'Configurações', acao: () => { irPara('#/config'); } },
+      { texto: 'Tentar de novo', primario: true, acao: async () => {
+        await testarConexao({ falha: false });
+        return !(Orbit.conexao && Orbit.conexao.ok) ? false : undefined; // fecha só se deu certo
+      } },
+    ],
+    classe: 'erro',
+  });
+  p._aoFechar = () => { if (_popupFalhaConexao === p) _popupFalhaConexao = null; };
+}
+
+function mostrarDetalheConexao(r) {
+  const sn = v => v ? '<span class="sim">OK</span>' : '<span class="nao">Falhou</span>';
+  abrirPopup({
+    titulo: r.ok ? 'Conectado' : 'Sem acesso',
+    subtitulo: r.pasta,
+    corpoHtml: `<table class="detalhe-conexao">
+      <tr><td>Leitura</td><td>${sn(r.leitura)}</td></tr>
+      <tr><td>Escrita</td><td>${sn(r.escrita)}</td></tr>
+      <tr><td>Tempo</td><td>${esc(r.ms)} ms</td></tr>
+      ${r.erro ? `<tr><td>Erro</td><td>${esc(r.erro)}</td></tr>` : ''}</table>`,
+    botoes: [{ texto: 'OK', primario: true }],
+    classe: r.ok ? '' : 'erro',
+  });
+}
+
 /* ---- Roteador --------------------------------------------------------- */
 
 const TITULOS = {
@@ -262,6 +339,7 @@ async function recarregar() {
   ativarNavegacao(true);
   if (!location.hash) location.hash = '#/clientes';
   await renderizar();
+  testarConexao({ falha: true }); // sem await: não atrasa a primeira tela
 }
 
 window.addEventListener('hashchange', renderizar);

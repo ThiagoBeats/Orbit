@@ -42,7 +42,17 @@ nav a { color:var(--muted); text-decoration:none; font-size:12px; letter-spacing
 nav a:hover { border-color:var(--line); }
 nav a.on { color:var(--text); background:var(--surface2); }
 nav.desativada a { opacity:.4; pointer-events:none; }
-.conexao { min-width:24px; min-height:24px; display:flex; align-items:center; } /* indicador de conexão: Tarefa 16 */
+.conexao { min-width:24px; min-height:24px; display:flex; align-items:center; }
+.conexao .ind { display:flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--muted); font:inherit; font-size:13px; cursor:pointer; transition:border-color .15s; }
+.conexao .ind:hover { border-color:var(--ok); }
+.conexao .ind .ponto { width:9px; height:9px; border-radius:50%; background:var(--muted); }
+.conexao .ind.ok .ponto { background:var(--ok); }
+.conexao .ind.falha .ponto { background:var(--pend); }
+.conexao .ind.testando { opacity:.6; cursor:progress; }
+.detalhe-conexao { width:100%; border-collapse:collapse; font-size:14px; }
+.detalhe-conexao td { padding:6px 0; border-bottom:1px solid var(--line); }
+.detalhe-conexao td:last-child { text-align:right; }
+.detalhe-conexao .sim { color:var(--ok); } .detalhe-conexao .nao { color:var(--pend); }
 
 /* ---- Tipografia de página -------------------------------------------- */
 #conteudo { padding-bottom:40px; }

@@ -295,3 +295,19 @@ def test_atualizar_cliente_strip_cnpj(api_base):
     c = _cliente(api, "Alfa")
     api.atualizar_cliente(c["id"], {"cnpj": " 12.345 "})
     assert api.obter_cliente(c["id"])["dados"]["cliente"]["cnpj"] == "12.345"
+
+
+def test_testar_conexao_sem_base_devolve_lista_vazia(caminhos):
+    assert _api(caminhos).testar_conexao() == {"ok": True, "dados": []}
+
+
+def test_testar_conexao_com_base(caminhos, tmp_path):
+    base = tmp_path / "base"
+    base.mkdir()
+    save_user_settings(UserSettings(pasta_base=str(base)), caminhos[0])
+    api = _api(caminhos)
+    r = api.testar_conexao()
+    assert r["ok"] and len(r["dados"]) == 1
+    d = r["dados"][0]
+    assert d["pasta"] == str(base) and d["ok"] is True and d["escrita"] is True
+    api.ao_fechar_janela()

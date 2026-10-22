@@ -18,6 +18,7 @@ from pathlib import Path
 
 from orbit.core.config import (TEMAS, add_tipo, load_shared_config, load_user_settings,
                                save_shared_config, save_user_settings)
+from orbit.core.connection import testar_pasta
 from orbit.core.email import EmailDraft, EmailService, SelecaoEnvio
 from orbit.core.errors import LockHeld, OrbitDataError, OrbitError
 from orbit.core.identity import current_identity
@@ -360,6 +361,17 @@ class Api:
                     except OSError:
                         pass
         return {"logo_url": self._logo_url()}
+
+    # --- teste de conexão (spec §12) -----------------------------------------
+
+    def testar_conexao(self) -> dict:
+        return self._chamar(self._testar_conexao)
+
+    def _testar_conexao(self):
+        if not self._settings.pasta_base:
+            return []  # sem pasta base: a tela de boas-vindas cuida disso
+        r = testar_pasta(Path(self._settings.pasta_base), current_identity())
+        return [asdict(r)]
 
     # --- clientes e projetos ---------------------------------------------
 
