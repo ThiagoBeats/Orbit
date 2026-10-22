@@ -135,3 +135,59 @@ main.painel { display:flex; gap:20px; padding:4px 32px 40px; }
 .contato-linha input { flex:1; min-width:0; background:var(--surface2); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-family:inherit; font-size:13px; color:var(--text); outline:none; }
 .contato-linha input:focus { border-color:var(--accent); }
 .btn.pequeno { padding:6px 12px; margin-top:0; }
+
+/* ---- Painel do projeto/máquina (Tarefa 11) -------------------------------- */
+.titulo-painel { display:flex; align-items:center; justify-content:space-between; gap:16px; padding-right:32px; }
+.titulo-painel .btn { margin:0; }
+.faixa-aviso { margin:16px 32px 0; padding:10px 16px; border:1px solid var(--warn); border-radius:12px; background:color-mix(in srgb, var(--warn) 10%, var(--surface)); color:var(--warn); display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:13px; }
+.coluna-cartoes { flex:1.1; min-width:0; }
+.coluna-cartoes .grid { flex:none; }
+.barra-selecao { display:flex; align-items:center; gap:8px; margin-bottom:12px; font-size:13px; color:var(--muted); }
+.barra-selecao .btn { margin:0; }
+.card.doc { position:relative; }
+.card.alvo { border-color:var(--accent); border-style:solid; }
+.card-topo { display:flex; align-items:center; gap:8px; }
+.card-topo .t { flex:1; min-width:0; }
+.card .marcar { width:15px; height:15px; accent-color:var(--accent); cursor:pointer; margin:0; }
+.menu-btn { background:none; border:1px solid transparent; border-radius:8px; color:var(--muted); font-size:16px; line-height:1; padding:2px 8px; cursor:pointer; font-family:inherit; transition:border-color .2s; }
+.menu-btn:hover { border-color:var(--line); color:var(--text); }
+.menu-cartao { position:absolute; right:10px; top:40px; z-index:5; background:var(--surface2); border:1px solid var(--line); border-radius:8px; box-shadow:var(--shadow); padding:4px; display:flex; flex-direction:column; min-width:170px; }
+.menu-cartao button { background:none; border:1px solid transparent; border-radius:6px; color:var(--text); text-align:left; padding:8px 10px; font-family:inherit; font-size:13px; cursor:pointer; transition:border-color .2s; }
+.menu-cartao button:hover { border-color:var(--line); }
+.card.na .menu-cartao { opacity:1; }
+.viewer { min-width:0; align-self:flex-start; }
+.viewer-titulo { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; font-size:13px; letter-spacing:.06em; }
+.viewer-titulo b { font-weight:500; }
+.pdf.vazio { height:240px; text-align:center; padding:16px; }
+.pdf.erro { color:var(--pend); text-transform:none; letter-spacing:0; font-size:13px; }
+.visualizador { width:100%; height:max(380px, calc(100vh - 460px)); border:1px solid var(--line); border-radius:8px; background:var(--surface2); display:block; }
+.visualizador.img { display:flex; align-items:center; justify-content:center; overflow:auto; padding:8px; }
+.visualizador.img img { max-width:100%; max-height:100%; object-fit:contain; }
+.nome-arquivo { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:8px; font-size:12px; color:var(--muted); }
+.nome-arquivo span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.link { background:none; border:none; color:var(--accent); font-family:inherit; font-size:12px; cursor:pointer; white-space:nowrap; padding:0; }
+.link:hover { text-decoration:underline; }
+.cartao-arquivo { border:1px solid var(--line); border-radius:12px; background:var(--surface2); padding:20px; }
+.cartao-arquivo .t { font-weight:500; word-break:break-all; margin-bottom:8px; }
+.editaveis .secao-titulo { margin:16px 0 6px; }
+.linha-editavel { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:13px; padding:4px 0; }
+.linha-editavel span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hist-item { cursor:pointer; border:1px solid transparent; border-radius:8px; padding:0 8px; margin:0 -8px; transition:border-color .2s; }
+.hist-item:hover { border-color:var(--line); }
+.hist-item.on b { color:var(--accent); }
+
+/* popups do painel */
+.linha-arquivo { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+.linha-arquivo .in { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.linha-arquivo .in.vazio { color:var(--muted); }
+.field .in.preview { word-break:break-all; font-size:13px; }
+.field .in.preview.erro { color:var(--pend); }
+.dica { font-size:12px; color:var(--muted); margin-top:6px; }
+.lista-status { display:flex; flex-direction:column; gap:8px; margin-top:12px; }
+.lista-status .opcao { min-width:0; text-align:left; font-family:inherit; color:var(--text); padding:10px 14px; }
+.lista-eventos { max-height:60vh; overflow:auto; }
+.evento { display:flex; gap:16px; padding:10px 0; border-bottom:1px solid var(--line); font-size:13px; }
+.evento:last-child { border-bottom:none; }
+.evento .quando { color:var(--muted); white-space:nowrap; min-width:110px; }
+.evento .oque b { font-weight:500; }
+.evento .quem { color:var(--muted); font-size:12px; margin-top:2px; }
