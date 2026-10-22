@@ -81,11 +81,11 @@ class EmailService:
         if not self.outlook.disponivel():
             raise OrbitError(MSG_SEM_OUTLOOK)
         self.outlook.abrir_rascunho(draft)
-        c = self.repo.load_container(container_id)
-        c.historico.append(self.repo.evento("email_preparado", {
-            "destinatarios": list(draft.destinatarios), "assunto": draft.assunto,
-            "itens": [{"tipo_id": s.tipo_id, "numero": s.numero} for s in selecoes]}))
-        self.repo.save_container(c)
+        with self.repo.editar_container(container_id) as c:
+            c.historico.append(self.repo.evento("email_preparado", {
+                "destinatarios": list(draft.destinatarios), "assunto": draft.assunto,
+                "itens": [{"tipo_id": s.tipo_id, "numero": s.numero} for s in selecoes]}))
+            self.repo.save_container(c)
 
     def listar_envios(self, filtro_cliente_id: str | None = None) -> list[dict]:
         pares: list[tuple[str | None, str]] = []  # (nome do cliente, id do container)

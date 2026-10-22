@@ -2,17 +2,21 @@
 from __future__ import annotations
 
 import os
+import threading
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 from uuid import uuid4
 
 from orbit.core.config import SharedConfig
-from orbit.core.errors import OrbitDataError, OrbitError
+from orbit.core.errors import LockHeld, OrbitDataError, OrbitError
 from orbit.core.identity import Identity
 from orbit.core.jsonstore import read_json, write_json_atomic
 from orbit.core.models import Cliente, Contato, Container, Documento, Evento
+from orbit.core.presence import PresenceService
 from orbit.core.naming import sanitize
 
 PASTA_CLIENTES = "Clientes"
@@ -22,6 +26,16 @@ ARQ_PROJETO = "projeto.json"
 ARQ_MAQUINA = "maquina.json"
 
 LIMITE_PASTA = 60
+
+# Trava do container (`<container>/.orbit/travas/_container.lock`): segurada só
+# durante ler-alterar-gravar do JSON, para duas máquinas (ou threads) não
+# perderem a alteração uma da outra. É curta: quem encontra a trava ocupada
+# espera até ESPERA_TRAVA_CONTAINER_S; com mais de MAX_IDADE_TRAVA_CONTAINER_S
+# ela é considerada abandonada (programa fechado no meio) e é recuperada.
+TRAVA_CONTAINER = "_container"
+ESPERA_TRAVA_CONTAINER_S = 5.0
+MAX_IDADE_TRAVA_CONTAINER_S = 60
+_INTERVALO_TRAVA_S = 0.05
 
 CAMPOS_EDITAVEIS = ("codigo", "nome", "pedido", "responsavel", "descricao", "situacao", "contatos")
 
@@ -51,6 +65,7 @@ class Repository:
         self.agora = agora
         self._idx_containers: dict[str, Path] = {}  # id -> caminho do JSON
         self._idx_clientes: dict[str, Path] = {}
+        self._travas_da_thread = threading.local()  # ids de container travados nesta thread
 
     # ---------- utilitários ----------
     def evento(self, tipo: str, dados: dict) -> Evento:
@@ -246,10 +261,66 @@ class Repository:
         return self._load_path(self._find("_idx_containers", self._scan_containers,
                                           container_id, "Projeto ou máquina"))
 
+    # ---------- trava do container ----------
+    def _ids_travados(self) -> set[str]:
+        ids = getattr(self._travas_da_thread, "ids", None)
+        if ids is None:
+            ids = self._travas_da_thread.ids = set()
+        return ids
+
+    @contextmanager
+    def trava_container(self, container_id: str) -> Iterator[None]:
+        """Segura a trava do container (reentrante na mesma thread)."""
+        ids = self._ids_travados()
+        if container_id in ids:
+            yield
+            return
+        pasta = self._find("_idx_containers", self._scan_containers, container_id,
+                           "Projeto ou máquina").parent
+        svc = PresenceService(self.identity, agora=self.agora)
+        trava = self._adquirir_trava(svc, pasta)
+        ids.add(container_id)
+        try:
+            yield
+        finally:
+            ids.discard(container_id)
+            # falha ao soltar: a trava vira "abandonada" em MAX_IDADE_TRAVA_CONTAINER_S
+            svc.liberar_varios([trava])
+
+    def _adquirir_trava(self, svc, pasta: Path):
+        limite = time.monotonic() + ESPERA_TRAVA_CONTAINER_S
+        lock = svc.caminho_trava(pasta, TRAVA_CONTAINER)
+        while True:
+            try:
+                return svc.travar(pasta, TRAVA_CONTAINER)
+            except LockHeld:
+                if svc.trava_abandonada(lock, MAX_IDADE_TRAVA_CONTAINER_S):
+                    svc.liberar_abandonada(lock, MAX_IDADE_TRAVA_CONTAINER_S)
+                    continue
+                if time.monotonic() >= limite:
+                    info = svc._ler_trava(lock)
+                    quem = (f"{info.usuario} ({info.computador})" if info is not None
+                            else "Outra pessoa")
+                    raise OrbitError(f"{quem} está gravando alterações neste projeto ou "
+                                     "máquina agora. Nada foi alterado; tente de novo em "
+                                     "instantes.") from None
+                time.sleep(_INTERVALO_TRAVA_S)
+
+    @contextmanager
+    def editar_container(self, container_id: str) -> Iterator[Container]:
+        """Trava o container e o relê do disco; quem usa grava com save_container dentro do bloco.
+
+        Toda alteração do JSON de um container passa por aqui: a leitura feita
+        dentro da trava garante que nada gravado por outra máquina se perde.
+        """
+        with self.trava_container(container_id):
+            yield self.load_container(container_id)
+
     def save_container(self, c: Container) -> None:
-        caminho = self._find("_idx_containers", self._scan_containers, c.id,
-                             "Projeto ou máquina")
-        write_json_atomic(caminho, c.to_dict())
+        with self.trava_container(c.id):
+            caminho = self._find("_idx_containers", self._scan_containers, c.id,
+                                 "Projeto ou máquina")
+            write_json_atomic(caminho, c.to_dict())
 
     def container_path(self, c: Container) -> Path:
         if c.tipo == "projeto":
@@ -275,21 +346,21 @@ class Repository:
         invalidos = [k for k in campos if k not in CAMPOS_EDITAVEIS]
         if invalidos:
             raise OrbitError(f"Campo não editável: {', '.join(invalidos)}")
-        c = self.load_container(container_id)
-        alterados = {}
-        for k, v in campos.items():
-            antigo = getattr(c, k)
-            if k == "contatos":
-                v = list(v)
-                antigo_j, novo_j = [x.to_dict() for x in antigo], [x.to_dict() for x in v]
-            else:
-                antigo_j, novo_j = antigo, v
-            if antigo_j != novo_j:
-                alterados[k] = [antigo_j, novo_j]
-                setattr(c, k, v)
-        if alterados:
-            c.historico.append(self.evento("dados_alterados", {"alterados": alterados}))
-            self.save_container(c)  # pastas não são renomeadas
+        with self.editar_container(container_id) as c:
+            alterados = {}
+            for k, v in campos.items():
+                antigo = getattr(c, k)
+                if k == "contatos":
+                    v = list(v)
+                    antigo_j, novo_j = [x.to_dict() for x in antigo], [x.to_dict() for x in v]
+                else:
+                    antigo_j, novo_j = antigo, v
+                if antigo_j != novo_j:
+                    alterados[k] = [antigo_j, novo_j]
+                    setattr(c, k, v)
+            if alterados:
+                c.historico.append(self.evento("dados_alterados", {"alterados": alterados}))
+                self.save_container(c)  # pastas não são renomeadas
         return c
 
     # ---------- listagens ----------

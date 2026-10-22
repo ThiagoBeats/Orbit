@@ -66,11 +66,20 @@ def register_untracked(repo: Repository, container_id: str,
                        itens: list[ArquivoNaoRegistrado], status: str) -> None:
     if status not in repo.config.status:
         raise OrbitError(f"Status inválido: {status}")
-    c = repo.load_container(container_id)
+    with repo.editar_container(container_id) as c:
+        _registrar(repo, c, itens, status)
+
+
+def _registrar(repo: Repository, c: Container, itens: list[ArquivoNaoRegistrado],
+               status: str) -> None:
     grupos: dict[tuple[str, int], list[ArquivoNaoRegistrado]] = {}
     for i in itens:
         if i.tipo_id not in c.documentos:
             raise OrbitError(f"Tipo de documento não encontrado: {i.tipo_id}")
+        conhecidos = {a.nome.casefold() for r in c.documentos[i.tipo_id].revisoes
+                      for a in r.arquivos}
+        if i.caminho.name.casefold() in conhecidos:
+            continue  # já registrado (ex.: por outro computador, antes desta trava)
         grupos.setdefault((i.tipo_id, i.numero), []).append(i)
     registrados = []
     for (tipo_id, numero) in sorted(grupos, key=lambda k: (k[0], k[1])):

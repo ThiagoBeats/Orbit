@@ -244,12 +244,6 @@ class RevisionService:
         except OSError as e:
             raise OrbitError(f"Não foi possível criar a pasta \"{doc.pasta}\": {e}")
 
-        # 2. "não se aplica" é desligado (gravado junto com a revisão, no passo d)
-        if doc.nao_se_aplica:
-            doc.nao_se_aplica = False
-            c.historico.append(self.repo.evento("nao_se_aplica_alterado",
-                                                {"tipo_id": tipo_id, "valor": False}))
-
         nova = Revisao(n, data.isoformat(), status, motivo, self.repo.identity.usuario,
                        self.repo.identity.computador,
                        [Arquivo(nome_p, "principal")] + [Arquivo(x, "editavel") for x in nomes_e])
@@ -265,15 +259,28 @@ class RevisionService:
             # (c) temporários -> nomes finais
             for tmp, nm in zip(temps, novos):
                 tx.renomear(tmp, pasta / nm)
-            # (d) JSON
+            # (d) JSON: relido dentro da trava do container (outra máquina pode ter
+            #     mudado outro documento, status etc. durante a cópia)
             tx.arquivo_atual = ARQ_PROJETO if c.tipo == "projeto" else ARQ_MAQUINA
-            if atual is not None:
-                atual.arquivada = True
-            doc.revisoes.append(nova)
-            c.historico.append(self.repo.evento("revisao_enviada",
-                                                {"tipo_id": tipo_id, "numero": n,
-                                                 "motivo": motivo}))
-            self.repo.save_container(c)
+            with self.repo.editar_container(container_id) as c2:
+                doc2 = self._documento(c2, tipo_id)
+                atual2 = doc2.atual
+                if ((atual2.numero if atual2 else None) != (atual.numero if atual else None)
+                        or any(r.numero == n for r in doc2.revisoes)):
+                    raise OrbitError("O documento foi alterado em outro computador durante o "
+                                     "envio. O envio foi desfeito; confira e tente de novo.")
+                # "não se aplica" é desligado junto com a revisão
+                if doc2.nao_se_aplica:
+                    doc2.nao_se_aplica = False
+                    c2.historico.append(self.repo.evento(
+                        "nao_se_aplica_alterado", {"tipo_id": tipo_id, "valor": False}))
+                if atual2 is not None:
+                    atual2.arquivada = True
+                doc2.revisoes.append(nova)
+                c2.historico.append(self.repo.evento("revisao_enviada",
+                                                     {"tipo_id": tipo_id, "numero": n,
+                                                      "motivo": motivo}))
+                self.repo.save_container(c2)
         except BaseException as e:
             _reerguer_falha(e, tx, "enviar a revisão")
         return nova
@@ -281,24 +288,25 @@ class RevisionService:
     def alterar_status(self, container_id: str, tipo_id: str, status: str) -> Revisao:
         if status not in self.repo.config.status:
             raise OrbitError(f"Status inválido: {status}")
-        c = self.repo.load_container(container_id)
-        atual = self._documento(c, tipo_id).atual
-        if atual is None:
-            raise OrbitError("Este documento ainda não tem revisão enviada.")
-        if atual.status != status:
-            de = atual.status
-            atual.status = status
-            c.historico.append(self.repo.evento("status_alterado",
-                                                {"tipo_id": tipo_id, "de": de, "para": status}))
-            self.repo.save_container(c)
+        with self.repo.editar_container(container_id) as c:
+            atual = self._documento(c, tipo_id).atual
+            if atual is None:
+                raise OrbitError("Este documento ainda não tem revisão enviada.")
+            if atual.status != status:
+                de = atual.status
+                atual.status = status
+                c.historico.append(self.repo.evento("status_alterado",
+                                                    {"tipo_id": tipo_id, "de": de,
+                                                     "para": status}))
+                self.repo.save_container(c)
         return atual
 
     def definir_nao_se_aplica(self, container_id: str, tipo_id: str, valor: bool) -> None:
-        c = self.repo.load_container(container_id)
-        doc = self._documento(c, tipo_id)
-        if doc.nao_se_aplica == bool(valor):
-            return
-        doc.nao_se_aplica = bool(valor)
-        c.historico.append(self.repo.evento("nao_se_aplica_alterado",
-                                            {"tipo_id": tipo_id, "valor": bool(valor)}))
-        self.repo.save_container(c)
+        with self.repo.editar_container(container_id) as c:
+            doc = self._documento(c, tipo_id)
+            if doc.nao_se_aplica == bool(valor):
+                return
+            doc.nao_se_aplica = bool(valor)
+            c.historico.append(self.repo.evento("nao_se_aplica_alterado",
+                                                {"tipo_id": tipo_id, "valor": bool(valor)}))
+            self.repo.save_container(c)

@@ -185,15 +185,7 @@ class ImportService:
             except OSError as e:
                 raise OrbitError(f"Não foi possível criar a pasta \"{antigos}\": {e}")
 
-        # 2. "não se aplica" é desligado (gravado junto, no passo d)
-        for tipo_id in por_tipo:
-            doc = c.documentos[tipo_id]
-            if doc.nao_se_aplica:
-                doc.nao_se_aplica = False
-                c.historico.append(self.repo.evento("nao_se_aplica_alterado",
-                                                    {"tipo_id": tipo_id, "valor": False}))
-
-        # 3. transação
+        # 2. transação
         tx = _Transacao()
         try:
             # (a) cópias para temporários, já na pasta final de cada revisão
@@ -210,22 +202,39 @@ class ImportService:
             # (c) temporários -> nomes finais
             for tmp, final in renomes:
                 tx.renomear(tmp, final)
-            # (d) JSON
+            # (d) JSON: relido dentro da trava do container (outra máquina pode ter
+            #     mudado outro documento, status etc. durante as cópias)
             tx.arquivo_atual = ARQ_PROJETO if c.tipo == "projeto" else ARQ_MAQUINA
-            for _, atual in a_arquivar:
-                atual.arquivada = True
-            for g in grupos:
-                p = g.principal
-                c.documentos[g.tipo_id].revisoes.append(Revisao(
-                    g.numero, g.data.isoformat(), p.status, p.motivo,
-                    self.repo.identity.usuario, self.repo.identity.computador,
-                    [Arquivo(g.nome_p, "principal")]
-                    + [Arquivo(nm, "editavel") for nm in g.nomes_e],
-                    arquivada=destino[id(g)]))
-            for tipo_id in por_tipo:
-                c.documentos[tipo_id].revisoes.sort(key=lambda r: r.numero)
-            c.historico.append(self.repo.evento("importacao", {"revisoes": [
-                {"tipo_id": g.tipo_id, "numero": g.numero} for g in grupos]}))
-            self.repo.save_container(c)
+            with self.repo.editar_container(container_id) as c2:
+                for tipo_id, gs in por_tipo.items():
+                    doc2 = c2.documentos.get(tipo_id)
+                    antes, agora = c.documentos[tipo_id].atual, doc2 and doc2.atual
+                    numeros = {g.numero for g in gs}
+                    if (doc2 is None
+                            or (agora.numero if agora else None) != (antes.numero if antes else None)
+                            or any(r.numero in numeros for r in doc2.revisoes)):
+                        raise OrbitError("O documento foi alterado em outro computador durante "
+                                         "a importação. A importação foi desfeita; confira e "
+                                         "tente de novo.")
+                    # "não se aplica" é desligado junto com as revisões
+                    if doc2.nao_se_aplica:
+                        doc2.nao_se_aplica = False
+                        c2.historico.append(self.repo.evento(
+                            "nao_se_aplica_alterado", {"tipo_id": tipo_id, "valor": False}))
+                for tipo_id, _ in a_arquivar:
+                    c2.documentos[tipo_id].atual.arquivada = True  # mesmo número (conferido)
+                for g in grupos:
+                    p = g.principal
+                    c2.documentos[g.tipo_id].revisoes.append(Revisao(
+                        g.numero, g.data.isoformat(), p.status, p.motivo,
+                        self.repo.identity.usuario, self.repo.identity.computador,
+                        [Arquivo(g.nome_p, "principal")]
+                        + [Arquivo(nm, "editavel") for nm in g.nomes_e],
+                        arquivada=destino[id(g)]))
+                for tipo_id in por_tipo:
+                    c2.documentos[tipo_id].revisoes.sort(key=lambda r: r.numero)
+                c2.historico.append(self.repo.evento("importacao", {"revisoes": [
+                    {"tipo_id": g.tipo_id, "numero": g.numero} for g in grupos]}))
+                self.repo.save_container(c2)
         except BaseException as e:
             _reerguer_falha(e, tx, "importar os arquivos")
