@@ -1,5 +1,6 @@
 """Cria a janela do Orbit (pywebview 6.x, WebView2)."""
 import json
+import sys
 from pathlib import Path
 
 import webview
@@ -7,7 +8,17 @@ from webview.dom import DOMEventHandler
 
 from orbit.ui.api import Api
 
-WEB = Path(__file__).resolve().parent / "web"
+
+
+def pasta_web() -> Path:
+    """Pasta `web/`: dentro do pacote do PyInstaller quando congelado, senão ao lado do módulo."""
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / "orbit" / "ui" / "web"
+    return Path(__file__).resolve().parent / "web"
+
+
+WEB = pasta_web()
+ICONE = WEB / "img" / "orbit-icon.ico"
 
 
 def caminhos_do_drop(evento) -> list[str]:
@@ -49,4 +60,4 @@ def run() -> None:
     # apaga a presença ao fechar (síncrono; o JS já pode não responder nessa hora).
     # O handler devolve None: devolver False cancelaria o fechamento.
     janela.events.closing += lambda: api.ao_fechar_janela()
-    webview.start(gui="edgechromium")
+    webview.start(gui="edgechromium", icon=str(ICONE))
