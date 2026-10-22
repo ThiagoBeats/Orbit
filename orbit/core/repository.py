@@ -1,6 +1,7 @@
 """Repositório: clientes, projetos, máquinas padrão e suas pastas."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -82,6 +83,19 @@ class Repository:
             raise OrbitError(f"Não foi possível criar a pasta de {descricao} ({pasta.name}): {e}")
 
     @staticmethod
+    def _desfazer_pastas(raiz: Path, subpastas: list[Path]) -> None:
+        """Remove as pastas VAZIAS que o Orbit acabou de criar (falha na criação).
+
+        Só usa os.rmdir, que nunca apaga pasta com conteúdo: se algo apareceu
+        lá dentro, a pasta fica (e as que a contêm também).
+        """
+        for pasta in [*subpastas, raiz]:
+            try:
+                os.rmdir(pasta)
+            except OSError:
+                pass
+
+    @staticmethod
     def _raw_id(path: Path) -> str | None:
         try:
             dados = read_json(path)
@@ -131,7 +145,11 @@ class Repository:
         cliente = Cliente(uuid4().hex, nome.strip(), pasta, cnpj, list(contatos or []))
         raiz = self.base / PASTA_CLIENTES / pasta
         self._criar_pasta(raiz, "o cliente")
-        write_json_atomic(raiz / ARQ_CLIENTE, cliente.to_dict())
+        try:
+            write_json_atomic(raiz / ARQ_CLIENTE, cliente.to_dict())
+        except BaseException:
+            self._desfazer_pastas(raiz, [])  # sem o JSON, a pasta vazia impediria nova tentativa
+            raise
         self._idx_clientes[cliente.id] = raiz / ARQ_CLIENTE
         return cliente
 
@@ -170,15 +188,24 @@ class Repository:
     # ---------- containers ----------
     def _novo_container(self, raiz: Path, c: Container) -> Container:
         self._criar_pasta(raiz, "o projeto" if c.tipo == "projeto" else "a máquina")
-        for t in self.config.tipos_ativos():
-            c.documentos[t.id] = Documento(t.id, t.pasta)
-            try:
-                (raiz / t.pasta / "Antigos").mkdir(parents=True, exist_ok=True)
-            except OSError as e:
-                raise OrbitError(f"Não foi possível criar a pasta \"{t.pasta}\" em {raiz.name} "
-                                 f"(caminho longo demais?): {e}")
-        caminho = raiz / _arquivo_de(c.tipo)
-        write_json_atomic(caminho, c.to_dict())
+        criadas: list[Path] = []  # em ordem de remoção (de dentro para fora)
+        try:
+            for t in self.config.tipos_ativos():
+                c.documentos[t.id] = Documento(t.id, t.pasta)
+                try:
+                    for pasta in (raiz / t.pasta, raiz / t.pasta / "Antigos"):
+                        if not pasta.is_dir():
+                            pasta.mkdir()
+                            criadas.insert(0, pasta)
+                except OSError as e:
+                    raise OrbitError(f"Não foi possível criar a pasta \"{t.pasta}\" em "
+                                     f"{raiz.name} (caminho longo demais?): {e}")
+            caminho = raiz / _arquivo_de(c.tipo)
+            write_json_atomic(caminho, c.to_dict())
+        except BaseException:
+            # sem o JSON, a pasta vazia impediria uma nova tentativa com o mesmo nome
+            self._desfazer_pastas(raiz, criadas)
+            raise
         self._idx_containers[c.id] = caminho
         return c
 
@@ -186,14 +213,15 @@ class Repository:
         return self.base / PASTA_CLIENTES / cliente.pasta
 
     def create_projeto(self, cliente_id: str, codigo: str, nome: str, pedido: str = "",
-                       responsavel: str = "", contatos: list[Contato] | None = None) -> Container:
+                       responsavel: str = "", contatos: list[Contato] | None = None,
+                       situacao: str = "ativo") -> Container:
         cliente = self.get_cliente(cliente_id)
         cod = self._nome_pasta(codigo, "o código do projeto")
         nm = self._nome_pasta(nome, "o nome do projeto")
         pasta = self._limitar(f"{cod} - {nm}", "o nome do projeto")
         c = Container(uuid4().hex, "projeto", codigo.strip(), nome.strip(), pasta,
                       cliente_id=cliente.id, pedido=pedido, responsavel=responsavel,
-                      contatos=list(contatos or []))
+                      contatos=list(contatos or []), situacao=situacao)
         return self._novo_container(self._pasta_cliente(cliente) / pasta, c)
 
     def create_maquina(self, codigo: str, nome: str, descricao: str = "") -> Container:

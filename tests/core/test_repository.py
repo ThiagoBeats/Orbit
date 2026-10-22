@@ -205,3 +205,72 @@ def test_lista_projetos_com_pasta_do_cliente_removida(repo):
     shutil.rmtree(repo.base / "Clientes" / "C" )
     with pytest.raises(OrbitError):
         repo.list_projetos(cli.id)
+
+
+# --- I4: falha na primeira gravação não deixa pasta órfã ---------------------
+
+def _gravacao_falha(monkeypatch, nome_arquivo):
+    import orbit.core.repository as modulo
+    real = modulo.write_json_atomic
+
+    def falso(path, data):
+        if Path(path).name == nome_arquivo:
+            raise OrbitError(f"Não foi possível gravar {nome_arquivo}: em uso.")
+        return real(path, data)
+    monkeypatch.setattr(modulo, "write_json_atomic", falso)
+    return real
+
+
+def test_criar_cliente_falha_na_gravacao_remove_pasta_vazia(repo, tmp_path, monkeypatch):
+    import orbit.core.repository as modulo
+    real = _gravacao_falha(monkeypatch, "cliente.json")
+    with pytest.raises(OrbitError, match="cliente.json"):
+        repo.create_cliente("Alfa")
+    assert not (tmp_path / "Clientes" / "Alfa").exists()
+    monkeypatch.setattr(modulo, "write_json_atomic", real)
+    assert repo.create_cliente("Alfa").nome == "Alfa"  # nova tentativa funciona
+
+
+def test_criar_projeto_falha_na_gravacao_remove_arvore_vazia(repo, tmp_path, monkeypatch):
+    import orbit.core.repository as modulo
+    cli = repo.create_cliente("Alfa")
+    real = _gravacao_falha(monkeypatch, "projeto.json")
+    with pytest.raises(OrbitError, match="projeto.json"):
+        repo.create_projeto(cli.id, "1", "Esteira")
+    assert [p.name for p in (tmp_path / "Clientes" / "Alfa").iterdir()] == ["cliente.json"]
+    monkeypatch.setattr(modulo, "write_json_atomic", real)
+    assert repo.create_projeto(cli.id, "1", "Esteira").nome == "Esteira"
+
+
+def test_criar_maquina_falha_na_gravacao_remove_arvore_vazia(repo, tmp_path, monkeypatch):
+    import orbit.core.repository as modulo
+    real = _gravacao_falha(monkeypatch, "maquina.json")
+    with pytest.raises(OrbitError):
+        repo.create_maquina("", "M1")
+    assert list((tmp_path / "Máquinas Padrão").iterdir()) == []
+    monkeypatch.setattr(modulo, "write_json_atomic", real)
+    assert repo.create_maquina("", "M1").nome == "M1"
+
+
+def test_limpeza_nunca_apaga_arquivo_que_apareceu(repo, tmp_path, monkeypatch):
+    import orbit.core.repository as modulo
+    cli = repo.create_cliente("Alfa")
+    real = modulo.write_json_atomic
+
+    def falso(path, data):
+        if Path(path).name == "projeto.json":
+            (Path(path).parent / "Lista de Tags" / "do usuario.pdf").write_text("x")
+            raise OrbitError("falhou")
+        return real(path, data)
+    monkeypatch.setattr(modulo, "write_json_atomic", falso)
+    with pytest.raises(OrbitError):
+        repo.create_projeto(cli.id, "1", "Esteira")
+    assert (tmp_path / "Clientes" / "Alfa" / "1 - Esteira" / "Lista de Tags"
+            / "do usuario.pdf").is_file()
+
+
+def test_criar_projeto_com_situacao(repo):
+    cli = repo.create_cliente("Alfa")
+    p = repo.create_projeto(cli.id, "1", "E", situacao="concluido")
+    assert repo.load_container(p.id).situacao == "concluido"
+    assert repo.load_container(p.id).historico == []

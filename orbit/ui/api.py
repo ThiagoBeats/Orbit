@@ -458,12 +458,11 @@ class Api:
     def _criar_projeto(self, cliente_id, dados):
         repo = self._exigir_repo()
         situacao = _validar_situacao(dados.get("situacao") or "ativo")
-        c = repo.create_projeto(cliente_id, str(dados.get("codigo", "")),
-                                str(dados.get("nome", "")), str(dados.get("pedido", "")),
-                                str(dados.get("responsavel", "")),
-                                _contatos(dados.get("contatos")))
-        if situacao != c.situacao:
-            c = repo.update_dados(c.id, situacao=situacao)
+        with self._trava_escrita:
+            c = repo.create_projeto(cliente_id, str(dados.get("codigo", "")),
+                                    str(dados.get("nome", "")), str(dados.get("pedido", "")),
+                                    str(dados.get("responsavel", "")),
+                                    _contatos(dados.get("contatos")), situacao=situacao)
         return {"id": c.id, "nome": c.nome, "codigo": c.codigo, "situacao": c.situacao}
 
     def atualizar_projeto(self, id, dados) -> dict:

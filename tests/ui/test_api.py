@@ -348,3 +348,30 @@ def test_abrir_base_com_rede_travada_nao_bloqueia(caminhos, tmp_path, monkeypatc
     api = Api(settings_path=caminhos[0], log_path=caminhos[1], timeout_conexao=0.1)
     assert time.perf_counter() - t0 < 2
     assert "Tempo esgotado" in api.get_settings()["dados"]["erro_base"]
+
+
+def test_criar_projeto_concluido_grava_uma_vez(api_base, monkeypatch):
+    api, _ = api_base
+    c = _cliente(api, "Alfa")
+
+    def proibido(*a, **k):
+        raise AssertionError("não deveria regravar")
+    monkeypatch.setattr(api._repo, "update_dados", proibido)
+    p = _projeto(api, c["id"], "P-1", "Um", situacao="concluido")
+    assert api._repo.load_container(p["id"]).situacao == "concluido"
+
+
+def test_falha_de_gravacao_vira_mensagem_clara(api_base, monkeypatch):
+    import os
+    from orbit.core import jsonstore
+    api, _ = api_base
+    c = _cliente(api, "Alfa")
+    p = _projeto(api, c["id"], "P-1", "Um")
+
+    def em_uso(a, b):
+        raise PermissionError(32, "em uso")
+    monkeypatch.setattr(jsonstore, "_ESPERA_S", 0)
+    monkeypatch.setattr(jsonstore.os, "replace", em_uso)
+    r = api.atualizar_projeto(p["id"], {"nome": "Dois"})
+    assert r["ok"] is False and "Erro inesperado" not in r["erro"]
+    assert "projeto.json" in r["erro"]
