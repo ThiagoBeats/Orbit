@@ -35,4 +35,4 @@ def test_fit_base_name_respeita_240(tmp_path):
     assert curto.endswith(" - 221026 - Rev00")
 
 def test_sanitize_barra_invertida():
-    assert sanitize("a\b") == "a-b"
+    assert sanitize("a\\b") == "a-b"
