@@ -1,3 +1,4 @@
+import os
 import shutil
 from datetime import date
 from pathlib import Path
@@ -272,3 +273,91 @@ def test_data_explicita_e_caminho_longo(ctx, repo):
     assert len({n[:-len(n.split(' - 221026')[-1])] for n in nomes}) == 1  # mesma base
     for nome in nomes:
         assert len(str(pasta / nome)) <= 240
+
+
+def test_arquivo_realmente_aberto_desfaz_tudo_e_permite_nova_tentativa(ctx, repo):
+    """Handle real aberto (sem monkeypatch): o rename falha com violação de
+    compartilhamento e o shutil.move não pode cair no fallback copiar+apagar."""
+    svc, p, origem = ctx
+    svc.enviar_revisao(p.id, TIPO, _arq(origem, "a.pdf", "pdf0"),
+                       [_arq(origem, "a.drawio", "dio0")], "Em elaboração", "")
+    pasta = repo.doc_path(p, TIPO)
+    json_path = repo.container_path(p) / "projeto.json"
+    antes = _snapshot(pasta)
+    json_antes = json_path.read_bytes()
+    novo_pdf = _arq(origem, "b.pdf", "pdf1")
+    novo_dio = _arq(origem, "b.drawio", "dio1")
+
+    with open(pasta / f"{BASE0}.pdf", "rb"):
+        with pytest.raises(ArquivoEmUso) as exc:
+            svc.enviar_revisao(p.id, TIPO, novo_pdf, [novo_dio], "Aprovado", "")
+        assert f"O arquivo {BASE0}.pdf está aberto em outro programa" in str(exc.value)
+        assert _snapshot(pasta) == antes
+        assert json_path.read_bytes() == json_antes
+        assert not list(pasta.rglob("~orbit-*"))
+
+    rev = svc.enviar_revisao(p.id, TIPO, novo_pdf, [novo_dio], "Aprovado", "")
+    assert rev.numero == 1
+    assert _snapshot(pasta) == {
+        f"{BASE1}.pdf": "pdf1",
+        f"{BASE1}.drawio": "dio1",
+        str(Path("Antigos") / f"{BASE0}.pdf"): "pdf0",
+        str(Path("Antigos") / f"{BASE0}.drawio"): "dio0",
+    }
+
+
+def test_falha_ao_renomear_temporario_cita_nome_final(ctx, repo, monkeypatch):
+    svc, p, origem = ctx
+    real_rename = os.rename
+
+    def rename_falha(a, b):
+        if Path(a).name.startswith("~orbit-"):
+            raise PermissionError(13, "Acesso negado", str(a))
+        return real_rename(a, b)
+
+    monkeypatch.setattr(os, "rename", rename_falha)
+    with pytest.raises(ArquivoEmUso) as exc:
+        svc.enviar_revisao(p.id, TIPO, _arq(origem, "a.pdf", "0"), [], "Em elaboração", "")
+    assert "~orbit-" not in str(exc.value)
+    assert f"O arquivo {BASE0}.pdf está aberto" in str(exc.value)
+    assert _snapshot(repo.doc_path(p, TIPO)) == {}
+
+
+@pytest.mark.parametrize("erro, esperado", [
+    (PermissionError(13, "Acesso negado"), ArquivoEmUso),
+    (OSError(5, "Erro de E/S"), OrbitError),
+])
+def test_falha_ao_gravar_json_desfaz_tudo(ctx, repo, monkeypatch, erro, esperado):
+    svc, p, origem = ctx
+    svc.enviar_revisao(p.id, TIPO, _arq(origem, "a.pdf", "pdf0"),
+                       [_arq(origem, "a.drawio", "dio0")], "Em elaboração", "")
+    pasta = repo.doc_path(p, TIPO)
+    json_path = repo.container_path(p) / "projeto.json"
+    antes = _snapshot(pasta)
+    json_antes = json_path.read_bytes()
+
+    def save_falha(c):
+        raise erro
+
+    monkeypatch.setattr(repo, "save_container", save_falha)
+    with pytest.raises(esperado) as exc:
+        svc.enviar_revisao(p.id, TIPO, _arq(origem, "b.pdf", "pdf1"),
+                           [_arq(origem, "b.drawio", "dio1")], "Aprovado", "")
+    assert "~orbit-" not in str(exc.value)
+    assert _snapshot(pasta) == antes
+    assert json_path.read_bytes() == json_antes
+    assert not list(pasta.rglob("~orbit-*"))
+
+
+def test_mover_nunca_sobrescreve_destino_que_aparece_depois_da_checagem(tmp_path, monkeypatch):
+    from orbit.core.revisions import _Transacao
+    src = _arq(tmp_path, "atual.pdf", "atual")
+    (tmp_path / "Antigos").mkdir()
+    dst = _arq(tmp_path / "Antigos", "atual.pdf", "outro")
+    tx = _Transacao()
+    monkeypatch.setattr(_Transacao, "_exigir_livre", staticmethod(lambda d: None))  # corrida
+    with pytest.raises(OSError):
+        tx.mover(src, dst)
+    assert src.read_text(encoding="utf-8") == "atual"
+    assert dst.read_text(encoding="utf-8") == "outro"
+    assert tx.desfazer() == []

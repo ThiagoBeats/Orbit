@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -29,13 +30,29 @@ class UploadPreview:
     nomes_editaveis: list[str]
 
 
+def _recusar_copia(origem, destino, *args, **kwargs):
+    """copy_function do shutil.move: proíbe o fallback copiar+apagar.
+
+    Origem e destino ficam sempre no mesmo volume, então o rename deveria bastar.
+    Se ele falhou (arquivo aberto, destino já existe...), o fallback deixaria uma
+    cópia solta (e poderia sobrescrever o destino). Reergue o erro original do
+    rename, que é a exceção em tratamento quando o shutil chama esta função.
+    """
+    original = sys.exception()
+    if isinstance(original, OSError):
+        raise original
+    raise OSError(f"Movimentação entre volumes recusada: {origem} -> {destino}")
+
+
 class _Transacao:
     """Registra cópias e movimentações e sabe desfazê-las em ordem inversa.
 
     - `copiar` só aceita destinos `~orbit-<uuid>.tmp` criados aqui; desfazer uma
       cópia é a única exclusão que o Orbit faz.
     - `mover`/`renomear` nunca sobrescrevem: o destino é conferido antes, e no
-      Windows `os.rename` também falha se o destino existir.
+      Windows `os.rename` também falha se o destino existir. `mover` usa
+      `shutil.move` com `_recusar_copia`, então nunca cai no fallback copiar+apagar.
+    - `arquivo_atual` é sempre um nome que o usuário reconhece (nunca o temporário).
     """
 
     def __init__(self) -> None:
@@ -63,11 +80,11 @@ class _Transacao:
     def mover(self, origem: Path, destino: Path) -> None:
         self.arquivo_atual = origem.name
         self._exigir_livre(destino)
-        shutil.move(str(origem), str(destino))
+        shutil.move(str(origem), str(destino), copy_function=_recusar_copia)
         self._ops.append(("movido", origem, destino))
 
     def renomear(self, origem: Path, destino: Path) -> None:
-        self.arquivo_atual = origem.name
+        self.arquivo_atual = destino.name  # a origem é um ~orbit-*.tmp
         self._exigir_livre(destino)
         os.rename(origem, destino)
         self._ops.append(("movido", origem, destino))
