@@ -18,7 +18,7 @@ from pathlib import Path
 
 from orbit.core.config import (TEMAS, add_tipo, load_shared_config, load_user_settings,
                                save_shared_config, save_user_settings)
-from orbit.core.connection import testar_pasta
+from orbit.core.connection import pasta_existe, testar_pasta
 from orbit.core.email import EmailDraft, EmailService, SelecaoEnvio
 from orbit.core.errors import LockHeld, OrbitDataError, OrbitError
 from orbit.core.identity import current_identity
@@ -75,7 +75,8 @@ def caminho_log_padrao() -> Path:
 
 class Api:
     def __init__(self, settings_path: Path | None = None, log_path: Path | None = None,
-                 outlook=None):
+                 outlook=None, timeout_conexao: float = 5.0):
+        self._timeout_conexao = timeout_conexao
         self._outlook = outlook if outlook is not None else OutlookClient()
         self._settings_path = settings_path
         self._log_path = log_path
@@ -135,7 +136,11 @@ class Api:
             pass  # o log nunca pode derrubar o programa
 
     def _abrir_base(self, base: Path) -> None:
-        if not base.is_dir():
+        try:
+            existe = pasta_existe(base, self._timeout_conexao)
+        except OrbitError as e:  # tempo esgotado: rede travada
+            raise OrbitError(f"A pasta base está inacessível ({e}): {base}")
+        if not existe:
             raise OrbitError(f"A pasta base não foi encontrada ou está inacessível: {base}")
         config = load_shared_config(base)  # cria .orbit/config.json na primeira vez
         fileserver = FileServer(base)
@@ -370,8 +375,23 @@ class Api:
     def _testar_conexao(self):
         if not self._settings.pasta_base:
             return []  # sem pasta base: a tela de boas-vindas cuida disso
-        r = testar_pasta(Path(self._settings.pasta_base), current_identity())
+        r = testar_pasta(Path(self._settings.pasta_base), current_identity(),
+                         self._timeout_conexao)
         return [asdict(r)]
+
+    def reabrir_base(self) -> dict:
+        """Nova tentativa de abrir a pasta base já configurada (ex.: rede voltou)."""
+        return self._chamar(self._reabrir_base)
+
+    def _reabrir_base(self):
+        if not self._settings.pasta_base:
+            raise OrbitError("Escolha a pasta base primeiro (em Configurações).")
+        try:
+            self._abrir_base(Path(self._settings.pasta_base))
+        except OrbitError as e:
+            self._erro_base = str(e)
+            raise
+        return self._dados_settings()
 
     # --- clientes e projetos ---------------------------------------------
 

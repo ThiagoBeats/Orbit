@@ -1,5 +1,5 @@
 /* Tela Configurações: pasta base, tema, tipos de documento, status e logo da empresa.
- * O teste de conexão entra numa tarefa futura. */
+ * Inclui o botão de teste de conexão (spec §9, §12). */
 
 Orbit.views.config = async el => {
   const s = Orbit.settings;
@@ -15,6 +15,7 @@ Orbit.views.config = async el => {
       <div class="bloco">
         <div class="caminho">${esc(s.pasta_base)}</div>
         <button type="button" class="btn" id="cfg-pasta">Trocar</button>
+        <button type="button" class="btn" id="cfg-conexao">Testar conexão</button>
       </div>
 
       <div class="secao-titulo">Tema</div>
@@ -76,6 +77,9 @@ Orbit.views.config = async el => {
     const settings = await api('trocar_pasta_base');
     if (settings) await recarregar();
   });
+
+  el.querySelector('#cfg-conexao').addEventListener('click',
+    () => testarConexao({ detalhe: true }));
 
   /* ---- logo ---- */
   function mostrarPrevia() {

@@ -215,16 +215,32 @@ async function testarConexao({ falha = false, detalhe = false } = {}) {
   }
 }
 
+/* Nova tentativa depois de uma falha. Devolve true se a base está acessível e o estado
+ * foi recarregado. Com a base fechada (offline na abertura), pede à Api para reabri-la. */
+async function tentarDeNovo() {
+  if (!Orbit.settings.base_ok) {
+    const r = await _apiQuieta('reabrir_base');
+    if (r && r.ok) { await recarregar(); return true; }
+    return { erro: (r && r.erro) || 'Erro desconhecido.' };
+  }
+  await testarConexao();
+  if (Orbit.conexao && Orbit.conexao.ok) { await recarregar(); return true; }
+  return { erro: Orbit.conexao && Orbit.conexao.erro };
+}
+
 function mostrarFalhaConexao(r) {
   if (_popupFalhaConexao) _popupFalhaConexao.fechar();
   const p = _popupFalhaConexao = abrirPopup({
     titulo: 'Sem acesso à pasta base',
-    corpoHtml: `<p>Não foi possível acessar a pasta base ${esc(r.pasta)}: ${esc(r.erro || 'erro desconhecido')}</p>`,
+    corpoHtml: `<p id="falha-msg">Não foi possível acessar a pasta base ${esc(r.pasta)}: ${esc(r.erro || 'erro desconhecido')}</p>`,
     botoes: [
       { texto: 'Configurações', acao: () => { irPara('#/config'); } },
-      { texto: 'Tentar de novo', primario: true, acao: async () => {
-        await testarConexao({ falha: false });
-        return !(Orbit.conexao && Orbit.conexao.ok) ? false : undefined; // fecha só se deu certo
+      { texto: 'Tentar de novo', primario: true, acao: async popup => {
+        const res = await tentarDeNovo();
+        if (res === true) return undefined; // recarregar() já fechou o popup
+        const m = popup.elemento.querySelector('#falha-msg');
+        if (m) m.textContent = `Não foi possível acessar a pasta base ${r.pasta}: ${res.erro || 'erro desconhecido'}`;
+        return false;
       } },
     ],
     classe: 'erro',
@@ -268,7 +284,11 @@ function irPara(hash) {
 let _renderizacao = 0;
 
 async function renderizar() {
-  if (!Orbit.settings || !Orbit.settings.base_ok) return;
+  if (!Orbit.settings) return;
+  if (!Orbit.settings.base_ok) {
+    if (Orbit.settings.pasta_base) telaSemBase();
+    return;
+  }
   const { nome, id } = lerRota();
   marcarNavegacao(nome);
   atualizarPresenca(nome, id);
@@ -317,6 +337,38 @@ function telaBoasVindas() {
   el.querySelector('#btn-pasta-base').addEventListener('click', escolherPastaBase);
 }
 
+/* Pasta base configurada mas inacessível na abertura (rede fora, pendrive removido):
+ * só Configurações fica disponível, com indicador vermelho e popup de falha. */
+function telaSemBase(autoTeste = false) {
+  sairPresenca();
+  const nav = document.getElementById('nav');
+  ativarNavegacao(true);
+  nav.classList.add('sem-base');
+  marcarNavegacao('config');
+  const s = Orbit.settings;
+  const el = document.getElementById('conteudo');
+  el.innerHTML = `
+    <div class="crumb">Orbit</div>
+    <h1>Configurações</h1>
+    <div class="pagina">
+      <div class="secao-titulo">Pasta base</div>
+      <div class="bloco">
+        <div class="caminho">${esc(s.pasta_base)}</div>
+        <p class="aviso">${esc(s.erro_base || 'A pasta base não está acessível.')}</p>
+        <button type="button" class="btn solid" id="sb-tentar">Tentar de novo</button>
+        <button type="button" class="btn" id="sb-testar">Testar conexão</button>
+        <button type="button" class="btn" id="sb-trocar">Trocar pasta base</button>
+      </div>
+    </div>`;
+  el.querySelector('#sb-tentar').addEventListener('click', async () => {
+    const res = await tentarDeNovo();
+    if (res !== true) mostrarErro(res.erro || 'Pasta base inacessível.');
+  });
+  el.querySelector('#sb-testar').addEventListener('click', () => testarConexao({ detalhe: true }));
+  el.querySelector('#sb-trocar').addEventListener('click', escolherPastaBase);
+  return autoTeste ? testarConexao({ falha: true }) : undefined;
+}
+
 async function escolherPastaBase() {
   const settings = await api('escolher_pasta_base');
   if (!settings) return; // cancelado
@@ -331,9 +383,14 @@ async function recarregar() {
   if (!Orbit.settings.base_ok) {
     Orbit.config = null;
     atualizarLogoEmpresa();
+    if (Orbit.settings.pasta_base) { await telaSemBase(true); return; }
+    Orbit.conexao = null;
+    _pintarIndicador(null, false);
     telaBoasVindas();
     return;
   }
+  if (_popupFalhaConexao) _popupFalhaConexao.fechar();
+  document.getElementById('nav').classList.remove('sem-base');
   Orbit.config = await api('get_config');
   atualizarLogoEmpresa();
   ativarNavegacao(true);

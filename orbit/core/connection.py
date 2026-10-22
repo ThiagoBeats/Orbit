@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from orbit.core.errors import OrbitError
 from orbit.core.identity import Identity
 from orbit.core.naming import sanitize
 
@@ -55,6 +56,27 @@ def _verificar(pasta: Path, identity: Identity, estado: dict) -> None:
             arq.unlink(missing_ok=True)  # arquivo temporário do próprio Orbit
         except OSError:
             pass
+
+
+def pasta_existe(pasta: Path, timeout: float = TIMEOUT_PADRAO) -> bool:
+    """Path.is_dir() com tempo limite: numa rede travada não bloqueia a abertura.
+
+    Levanta OrbitError("Tempo esgotado") se estourar (a thread presa é abandonada).
+    """
+    res: list[bool] = []
+
+    def rodar():
+        try:
+            res.append(Path(pasta).is_dir())
+        except OSError:
+            res.append(False)
+
+    t = threading.Thread(target=rodar, daemon=True)
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        raise OrbitError("Tempo esgotado")
+    return res[0]
 
 
 def _msg(e: OSError) -> str:

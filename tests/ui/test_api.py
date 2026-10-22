@@ -311,3 +311,40 @@ def test_testar_conexao_com_base(caminhos, tmp_path):
     d = r["dados"][0]
     assert d["pasta"] == str(base) and d["ok"] is True and d["escrita"] is True
     api.ao_fechar_janela()
+
+
+def test_testar_conexao_base_configurada_mas_nao_abriu(caminhos, tmp_path):
+    save_user_settings(UserSettings(pasta_base=str(tmp_path / "sumiu")), caminhos[0])
+    api = _api(caminhos)
+    assert api.get_settings()["dados"]["base_ok"] is False
+    r = api.testar_conexao()
+    assert r["ok"] and len(r["dados"]) == 1
+    assert r["dados"][0]["ok"] is False and r["dados"][0]["erro"]
+
+
+def test_reabrir_base_sucesso_e_falha(caminhos, tmp_path):
+    base = tmp_path / "base"
+    save_user_settings(UserSettings(pasta_base=str(base)), caminhos[0])
+    api = _api(caminhos)
+    falha = api.reabrir_base()
+    assert falha["ok"] is False and "base" in falha["erro"]
+    assert api.get_settings()["dados"]["erro_base"]
+    base.mkdir()
+    ok = api.reabrir_base()
+    assert ok["ok"] and ok["dados"]["base_ok"] is True and ok["dados"]["erro_base"] is None
+    api.ao_fechar_janela()
+
+
+def test_reabrir_base_sem_pasta_configurada(caminhos):
+    assert _api(caminhos).reabrir_base()["ok"] is False
+
+
+def test_abrir_base_com_rede_travada_nao_bloqueia(caminhos, tmp_path, monkeypatch):
+    import time
+    from orbit.core import connection
+    monkeypatch.setattr(connection.Path, "is_dir", lambda self: time.sleep(3) or True)
+    save_user_settings(UserSettings(pasta_base=str(tmp_path)), caminhos[0])
+    t0 = time.perf_counter()
+    api = Api(settings_path=caminhos[0], log_path=caminhos[1], timeout_conexao=0.1)
+    assert time.perf_counter() - t0 < 2
+    assert "Tempo esgotado" in api.get_settings()["dados"]["erro_base"]

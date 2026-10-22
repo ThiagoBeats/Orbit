@@ -61,3 +61,13 @@ def test_arquivo_de_teste_removido_mesmo_se_leitura_falha(tmp_path, monkeypatch)
     r = testar_pasta(tmp_path, ID)
     assert not r.ok and "falha de leitura" in r.erro
     assert list((tmp_path / ".orbit").glob(".teste-conexao-*")) == []
+
+
+def test_pasta_existe_timeout(tmp_path, monkeypatch):
+    import pytest
+    from orbit.core.errors import OrbitError
+    monkeypatch.setattr(connection.Path, "is_dir", lambda self: time.sleep(2) or True)
+    t0 = time.perf_counter()
+    with pytest.raises(OrbitError, match="Tempo esgotado"):
+        connection.pasta_existe(tmp_path, 0.1)
+    assert time.perf_counter() - t0 < 1.5
