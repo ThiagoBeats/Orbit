@@ -40,6 +40,15 @@ def _contatos(lista) -> list[Contato]:
     return out
 
 
+SITUACOES = ("ativo", "concluido")
+
+
+def _validar_situacao(valor) -> str:
+    if valor not in SITUACOES:
+        raise OrbitError(f"Situação inválida: {valor}")
+    return valor
+
+
 def caminho_log_padrao() -> Path:
     return Path(os.environ["APPDATA"]) / "Orbit" / "orbit.log"
 
@@ -202,7 +211,7 @@ class Api:
         if "nome" in dados:
             c.nome = str(dados["nome"]).strip()
         if "cnpj" in dados:
-            c.cnpj = str(dados["cnpj"])
+            c.cnpj = str(dados["cnpj"]).strip()
         if "contatos" in dados:
             c.contatos = _contatos(dados["contatos"])
         repo.update_cliente(c)
@@ -221,12 +230,13 @@ class Api:
 
     def _criar_projeto(self, cliente_id, dados):
         repo = self._exigir_repo()
+        situacao = _validar_situacao(dados.get("situacao") or "ativo")
         c = repo.create_projeto(cliente_id, str(dados.get("codigo", "")),
                                 str(dados.get("nome", "")), str(dados.get("pedido", "")),
                                 str(dados.get("responsavel", "")),
                                 _contatos(dados.get("contatos")))
-        if dados.get("situacao") and dados["situacao"] != c.situacao:
-            c = repo.update_dados(c.id, situacao=dados["situacao"])
+        if situacao != c.situacao:
+            c = repo.update_dados(c.id, situacao=situacao)
         return {"id": c.id, "nome": c.nome, "codigo": c.codigo, "situacao": c.situacao}
 
     def atualizar_projeto(self, id, dados) -> dict:
@@ -234,13 +244,13 @@ class Api:
 
     def _atualizar_projeto(self, id, dados):
         repo = self._exigir_repo()
-        campos = {k: dados[k] for k in ("codigo", "nome", "pedido", "responsavel", "situacao")
-                  if k in dados}
+        campos = {k: str(dados[k]).strip()
+                  for k in ("codigo", "nome", "pedido", "responsavel") if k in dados}
         for k in ("codigo", "nome"):
-            if k in campos and not str(campos[k]).strip():
+            if k in campos and not campos[k]:
                 raise OrbitError("Informe o código e o nome do projeto.")
-        if "situacao" in campos and campos["situacao"] not in ("ativo", "concluido"):
-            raise OrbitError(f"Situação inválida: {campos['situacao']}")
+        if "situacao" in dados:
+            campos["situacao"] = _validar_situacao(dados["situacao"])
         if "contatos" in dados:
             campos["contatos"] = _contatos(dados["contatos"])
         repo.update_dados(id, **campos)

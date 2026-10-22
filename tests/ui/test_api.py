@@ -238,6 +238,9 @@ def test_atualizar_projeto_com_contatos(api_base):
     assert r["ok"] is True
     proj = api.obter_cliente(c["id"])["dados"]["projetos"][0]
     assert proj["nome"] == "Um B"
+    carregado = api._repo.load_container(p["id"])
+    assert [(x.nome, x.email) for x in carregado.contatos] == [("Bia", "b@x.com")]
+    assert carregado.pedido == "99"
 
 
 def test_criar_projeto_cliente_inexistente_da_erro(api_base):
@@ -248,3 +251,47 @@ def test_criar_projeto_cliente_inexistente_da_erro(api_base):
 def test_clientes_sem_base_da_erro(caminhos):
     r = _api(caminhos).listar_clientes()
     assert r["ok"] is False and "pasta base" in r["erro"].lower()
+
+
+def test_criar_projeto_situacao_invalida_nao_cria_nada(api_base):
+    api, base = api_base
+    c = _cliente(api, "Alfa")
+    r = api.criar_projeto(c["id"], {"codigo": "P-1", "nome": "Um", "situacao": "xyz"})
+    assert r["ok"] is False and "situação" in r["erro"].lower()
+    assert list((base / "Clientes" / "Alfa").glob("*/projeto.json")) == []
+    assert [p.name for p in (base / "Clientes" / "Alfa").iterdir()] == ["cliente.json"]
+
+
+def test_criar_projeto_concluido_persiste(api_base):
+    api, _ = api_base
+    c = _cliente(api, "Alfa")
+    p = _projeto(api, c["id"], "P-1", "Um", situacao="concluido")
+    assert p["situacao"] == "concluido"
+    assert api._repo.load_container(p["id"]).situacao == "concluido"
+
+
+def test_atualizar_projeto_situacao_invalida(api_base):
+    api, _ = api_base
+    c = _cliente(api, "Alfa")
+    p = _projeto(api, c["id"], "P-1", "Um")
+    assert api.atualizar_projeto(p["id"], {"situacao": "xyz"})["ok"] is False
+
+
+def test_atualizar_projeto_strip_e_vazio(api_base):
+    api, _ = api_base
+    c = _cliente(api, "Alfa")
+    p = _projeto(api, c["id"], "P-1", "Um")
+    assert api.atualizar_projeto(p["id"], {"nome": "  Novo  ", "responsavel": " Zé "})["ok"] is True
+    cont = api._repo.load_container(p["id"])
+    assert cont.nome == "Novo" and cont.responsavel == "Zé"
+    for campo in ("codigo", "nome"):
+        r = api.atualizar_projeto(p["id"], {campo: "   "})
+        assert r["ok"] is False and "informe" in r["erro"].lower()
+    assert api._repo.load_container(p["id"]).nome == "Novo"
+
+
+def test_atualizar_cliente_strip_cnpj(api_base):
+    api, _ = api_base
+    c = _cliente(api, "Alfa")
+    api.atualizar_cliente(c["id"], {"cnpj": " 12.345 "})
+    assert api.obter_cliente(c["id"])["dados"]["cliente"]["cnpj"] == "12.345"
