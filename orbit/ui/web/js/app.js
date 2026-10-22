@@ -4,6 +4,14 @@
  *   Chama window.pywebview.api[nome]. Em sucesso devolve "dados". Se a Api
  *   responder {ok:false}, mostra o popup de erro e lança ErroApi (que o resto
  *   do código pode ignorar: o usuário já foi avisado).
+ *   Se a resposta trouxer "trava" (LockHeld: outra pessoa enviando revisão do
+ *   mesmo documento), mostra o popup da trava, que oferece "Liberar trava"
+ *   quando trava.abandonada é true (ver mostrarTrava).
+ *
+ * Presença (spec §12): ao entrar numa rota de container (#/projeto/<id> ou
+ *   #/maquina/<id>) chama entrar_container e avisa se há outras pessoas; um
+ *   timer de 30 s chama sinalizar_container; ao sair da rota chama
+ *   sair_container. No fechamento da janela o Python (app.py) apaga a presença.
  *
  * Telas: cada arquivo em js/views/ registra Orbit.views[nome] = async (el, id) => {...}
  *   Rotas: #/clientes  #/cliente/<id>  #/projeto/<id>  #/maquinas  #/maquina/<id>
@@ -31,10 +39,72 @@ async function api(nome, ...args) {
   }
   if (!r || !r.ok) {
     const msg = (r && r.erro) || 'Erro desconhecido.';
-    mostrarErro(msg);
+    if (r && r.trava) mostrarTrava(msg, r.trava); else mostrarErro(msg);
     throw new ErroApi(msg);
   }
   return r.dados;
+}
+
+/* Chamada à Api sem popup de erro (presença: é só um aviso, não atrapalha o uso). */
+async function _apiQuieta(nome, ...args) {
+  try {
+    const ponte = window.pywebview && window.pywebview.api;
+    return ponte && typeof ponte[nome] === 'function'
+      ? await ponte[nome](...args) : { ok: false, erro: nome };
+  } catch (e) {
+    return { ok: false, erro: String(e) };
+  }
+}
+
+/* Popup de LockHeld. Trava abandonada (mais de 10 min) pode ser liberada. */
+function mostrarTrava(mensagem, trava) {
+  const podeLiberar = trava.abandonada && trava.container_id && trava.tipo_id;
+  return abrirPopup({
+    titulo: 'Documento em uso',
+    corpoHtml: `<p>${esc(mensagem)}</p>` + (podeLiberar
+      ? '<p class="texto-sec">A trava tem mais de 10 minutos e parece abandonada (o envio pode ter sido interrompido). Se ninguém está enviando este documento agora, você pode liberá-la e tentar de novo.</p>'
+      : '<p class="texto-sec">Aguarde o envio terminar e tente de novo.</p>'),
+    botoes: podeLiberar
+      ? [{ texto: 'Fechar' },
+         { texto: 'Liberar trava', primario: true, acao: async () => {
+           await api('liberar_trava', trava.container_id, trava.tipo_id);
+           abrirPopup({ titulo: 'Trava liberada',
+             corpoHtml: '<p>A trava foi liberada. Tente enviar de novo.</p>',
+             botoes: [{ texto: 'OK', primario: true }] });
+         } }]
+      : [{ texto: 'OK', primario: true }],
+    classe: 'erro',
+  });
+}
+
+/* ---- Presença no container --------------------------------------------- */
+
+const SINAL_PRESENCA_MS = 30000;
+const _presenca = { id: null, timer: null };
+
+function sairPresenca() {
+  if (_presenca.timer) clearInterval(_presenca.timer);
+  const id = _presenca.id;
+  _presenca.id = null;
+  _presenca.timer = null;
+  if (id) _apiQuieta('sair_container', id);
+}
+
+async function atualizarPresenca(nome, id) {
+  const novo = (nome === 'projeto' || nome === 'maquina') && id ? id : null;
+  if (novo === _presenca.id) return; // re-renderização da mesma tela
+  sairPresenca();
+  if (!novo) return;
+  _presenca.id = novo;
+  _presenca.timer = setInterval(() => _apiQuieta('sinalizar_container', novo),
+    SINAL_PRESENCA_MS);
+  const r = await _apiQuieta('entrar_container', novo);
+  if (_presenca.id !== novo || !r || !r.ok || !r.dados.length) return;
+  abrirPopup({
+    titulo: 'Aberto por outra pessoa',
+    corpoHtml: r.dados.map(o => `<p>${esc(o.usuario)} (${esc(o.computador)}) está com este projeto aberto desde ${esc(o.hora)}. Cuidado com alterações simultâneas.</p>`).join(''),
+    botoes: [{ texto: 'OK', primario: true }],
+  });
 }
 
 window.addEventListener('unhandledrejection', e => {
@@ -124,6 +194,7 @@ async function renderizar() {
   if (!Orbit.settings || !Orbit.settings.base_ok) return;
   const { nome, id } = lerRota();
   marcarNavegacao(nome);
+  atualizarPresenca(nome, id);
   const el = document.getElementById('conteudo');
   const minha = ++_renderizacao;
   el.innerHTML = '';
@@ -150,6 +221,7 @@ function telaEmConstrucao(nome) {
 /* ---- Primeira execução: boas-vindas ----------------------------------- */
 
 function telaBoasVindas() {
+  sairPresenca();
   ativarNavegacao(false);
   marcarNavegacao(null);
   const erro = Orbit.settings && Orbit.settings.erro_base;

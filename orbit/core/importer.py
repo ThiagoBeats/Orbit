@@ -11,11 +11,15 @@ import os
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from orbit.core.errors import OrbitError
 from orbit.core.models import Arquivo, Container, Revisao
 from orbit.core.repository import ARQ_MAQUINA, ARQ_PROJETO, Repository
 from orbit.core.revisions import PASTA_ANTIGOS, _nomes_finais, _reerguer_falha, _Transacao
+
+if TYPE_CHECKING:
+    from orbit.core.presence import PresenceService
 
 PAPEIS = ("principal", "editavel")
 
@@ -45,8 +49,9 @@ class _Grupo:
 
 
 class ImportService:
-    def __init__(self, repo: Repository):
+    def __init__(self, repo: Repository, presence: PresenceService | None = None):
         self.repo = repo
+        self.presence = presence  # None: sem trava de upload (uso local/testes antigos)
 
     # ---------- validação ----------
     def validar(self, container_id: str, itens: list[ItemImportacao]) -> list[str | None]:
@@ -130,6 +135,20 @@ class ImportService:
     def importar(self, container_id: str, itens: list[ItemImportacao]) -> None:
         if not itens:
             raise OrbitError("Nenhum arquivo para importar.")
+        if self.presence is None:
+            return self._importar(container_id, itens)
+        c = self.repo.load_container(container_id)
+        # uma trava por tipo envolvido (em ordem; se uma falhar, as outras são soltas).
+        # Tipos inexistentes não ganham trava: a validação recusa a importação.
+        travas = self.presence.travar_varios(
+            self.repo.container_path(c),
+            [it.tipo_id for it in itens if it.tipo_id in c.documentos])
+        try:
+            return self._importar(container_id, itens)  # recarrega já com as travas
+        finally:
+            self.presence.liberar_varios(travas)
+
+    def _importar(self, container_id: str, itens: list[ItemImportacao]) -> None:
         c = self.repo.load_container(container_id)
         erros, grupos = self._validar(c, itens)
         linhas = [f"linha {i + 1}: {e}" for i, e in enumerate(erros) if e is not None]

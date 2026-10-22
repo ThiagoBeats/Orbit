@@ -19,12 +19,13 @@ from pathlib import Path
 from orbit.core.config import (TEMAS, add_tipo, load_shared_config, load_user_settings,
                                save_shared_config, save_user_settings)
 from orbit.core.email import EmailDraft, EmailService, SelecaoEnvio
-from orbit.core.errors import OrbitDataError, OrbitError
+from orbit.core.errors import LockHeld, OrbitDataError, OrbitError
 from orbit.core.identity import current_identity
 from orbit.core.models import Contato, Revisao
 from orbit.core.outlook import OutlookClient
 from orbit.core.importer import PAPEIS, ImportService, ItemImportacao
 from orbit.core.naming import parse_rev, sanitize
+from orbit.core.presence import PresenceService
 from orbit.core.reconcile import find_untracked, register_untracked
 from orbit.core.repository import Repository
 from orbit.core.revisions import PASTA_ANTIGOS, RevisionService
@@ -84,6 +85,9 @@ class Api:
         self._repo: Repository | None = None
         self._fileserver: FileServer | None = None
         self._erro_base: str | None = None
+        self._agora = datetime.now  # relógio da presença/travas (testes trocam)
+        # containers com presença gravada nesta janela: id -> pasta do container
+        self._presencas: dict[str, Path] = {}
         # métodos da Api rodam em threads paralelas: uma escrita por vez
         self._trava_escrita = threading.RLock()
         if self._settings.pasta_base:
@@ -107,6 +111,11 @@ class Api:
     def _chamar(self, fn, *args) -> dict:
         try:
             return {"ok": True, "dados": fn(*args)}
+        except LockHeld as e:
+            # "trava" permite ao JS oferecer "Liberar trava" quando ela está abandonada
+            return {"ok": False, "erro": str(e), "trava": {
+                "container_id": getattr(e, "container_id", None), "tipo_id": e.tipo_id,
+                "abandonada": bool(e.abandonada)}}
         except OrbitError as e:
             return {"ok": False, "erro": str(e)}
         except Exception as e:
@@ -131,6 +140,7 @@ class Api:
         fileserver.start()  # se falhar, o estado anterior continua valendo
         antigo = self._fileserver
         repo = Repository(base, current_identity(), config)
+        self._sair_de_todos()  # presenças gravadas na base anterior
         self._base, self._config, self._fileserver = base, config, fileserver
         self._repo = repo
         if antigo is not None:
@@ -443,7 +453,98 @@ class Api:
     # --- painel do projeto/máquina -------------------------------------------
 
     def _revisoes(self) -> RevisionService:
-        return RevisionService(self._exigir_repo())
+        return RevisionService(self._exigir_repo(), presence=self._presenca())
+
+    # --- presença e travas de upload (spec §12) --------------------------------
+
+    def _presenca(self) -> PresenceService:
+        return PresenceService(self._exigir_repo().identity, agora=self._agora)
+
+    def _pasta_container(self, container_id) -> Path:
+        repo = self._exigir_repo()
+        return repo.container_path(repo.load_container(str(container_id)))
+
+    def entrar_container(self, id) -> dict:
+        """Grava a presença e devolve quem mais está com o container aberto."""
+        return self._chamar(self._entrar_container, id)
+
+    def _entrar_container(self, id):
+        pasta = self._pasta_container(id)
+        svc = self._presenca()
+        self._presencas[str(id)] = pasta
+        self._sinalizar(svc, pasta)
+        try:
+            outros = svc.outros(pasta)
+        except OSError as e:
+            self._registrar_erro(e)
+            outros = []
+        return [{"usuario": o.usuario, "computador": o.computador, "desde": o.desde,
+                 "hora": o.desde[11:16]} for o in outros]
+
+    def _sinalizar(self, svc: PresenceService, pasta: Path) -> None:
+        """A presença é só um aviso: falha de rede não pode atrapalhar o uso."""
+        try:
+            svc.sinalizar(pasta)
+        except (OSError, OrbitError) as e:
+            self._registrar_erro(e)
+
+    def sinalizar_container(self, id) -> dict:
+        """Chamado pelo timer de 30 s do JS enquanto o container está aberto."""
+        return self._chamar(self._sinalizar_container, id)
+
+    def _sinalizar_container(self, id):
+        pasta = self._presencas.get(str(id))
+        # só renova quem entrou: um sinal atrasado depois de sair não recria a presença
+        if pasta is not None:
+            self._sinalizar(self._presenca(), pasta)
+        return None
+
+    def sair_container(self, id) -> dict:
+        return self._chamar(self._sair_container, id)
+
+    def _sair_container(self, id):
+        pasta = self._presencas.pop(str(id), None)
+        if pasta is not None and self._repo is not None:
+            try:
+                self._presenca().sair(pasta)
+            except OSError as e:
+                self._registrar_erro(e)
+        return None
+
+    def _sair_de_todos(self) -> None:
+        for cid in list(self._presencas):
+            self._sair_container(cid)
+
+    def ao_fechar_janela(self) -> None:
+        """Handler de window.events.closing: apaga as presenças desta janela."""
+        try:
+            self._sair_de_todos()
+        except Exception as e:  # nunca impede o fechamento
+            self._registrar_erro(e)
+
+    ao_fechar_janela._serializable = False
+
+    def liberar_trava(self, id, tipo_id) -> dict:
+        """Remove a trava de upload, mas só se ela estiver abandonada (> 10 min)."""
+        return self._chamar(self._liberar_trava, id, tipo_id)
+
+    def _liberar_trava(self, id, tipo_id):
+        repo = self._exigir_repo()
+        c = repo.load_container(str(id))
+        if str(tipo_id) not in c.documentos:
+            raise OrbitError(f"Tipo de documento não encontrado: {tipo_id}")
+        svc = self._presenca()
+        lock = svc.caminho_trava(repo.container_path(c), str(tipo_id))
+        if not lock.exists():
+            return None  # já liberada
+        if not svc.trava_abandonada(lock):
+            raise OrbitError("A trava ainda está em uso (tem menos de 10 minutos) e não "
+                             "pode ser liberada.")
+        try:
+            svc.liberar(lock)
+        except OSError as e:
+            raise OrbitError(f"Não foi possível liberar a trava: {e}")
+        return None
 
     def obter_painel(self, container_id) -> dict:
         return self._chamar(self._obter_painel, container_id)
@@ -593,8 +694,12 @@ class Api:
         p, eds = _arquivos_upload(principal, editaveis)
         n = _numero_revisao(numero, opcional=True)
         with self._trava_escrita:
-            rev = self._revisoes().enviar_revisao(container_id, tipo_id, p, eds, str(status),
-                                                  str(motivo or "").strip(), n)
+            try:
+                rev = self._revisoes().enviar_revisao(container_id, tipo_id, p, eds,
+                                                      str(status), str(motivo or "").strip(), n)
+            except LockHeld as e:
+                e.container_id = container_id
+                raise
         return _rev_dict(rev)
 
     def alterar_status(self, container_id, tipo_id, status) -> dict:
@@ -799,7 +904,11 @@ class Api:
             except OrbitError as e:
                 raise OrbitError(f"Linha {i + 1}: {e}")
         with self._trava_escrita:
-            ImportService(repo).importar(container_id, lista)
+            try:
+                ImportService(repo, presence=self._presenca()).importar(container_id, lista)
+            except LockHeld as e:
+                e.container_id = container_id
+                raise
         return None
 
     def listar_nao_registrados(self, container_id) -> dict:

@@ -12,12 +12,16 @@ import sys
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from orbit.core.errors import ArquivoEmUso, OrbitError
 from orbit.core.models import Arquivo, Container, Documento, Revisao
 from orbit.core.naming import build_base_name, build_file_names, fit_base_name
 from orbit.core.repository import ARQ_MAQUINA, ARQ_PROJETO, Repository
+
+if TYPE_CHECKING:
+    from orbit.core.presence import PresenceService
 
 PASTA_ANTIGOS = "Antigos"
 LIMITE_CAMINHO = 240
@@ -144,8 +148,9 @@ def _reerguer_falha(e: BaseException, tx: "_Transacao", acao: str) -> None:
 
 
 class RevisionService:
-    def __init__(self, repo: Repository):
+    def __init__(self, repo: Repository, presence: PresenceService | None = None):
         self.repo = repo
+        self.presence = presence  # None: sem trava de upload (uso local/testes antigos)
 
     # ---------- auxiliares ----------
     @staticmethod
@@ -186,6 +191,22 @@ class RevisionService:
     def enviar_revisao(self, container_id: str, tipo_id: str, principal: Path,
                        editaveis: list[Path], status: str, motivo: str,
                        numero: int | None = None, data: date | None = None) -> Revisao:
+        if self.presence is None:
+            return self._enviar_revisao(container_id, tipo_id, principal, editaveis, status,
+                                        motivo, numero, data)
+        c = self.repo.load_container(container_id)
+        self._documento(c, tipo_id)  # tipo inexistente: erro antes de criar trava
+        travas = self.presence.travar_varios(self.repo.container_path(c), [tipo_id])
+        try:
+            # recarrega já com a trava: outro computador pode ter acabado de enviar
+            return self._enviar_revisao(container_id, tipo_id, principal, editaveis, status,
+                                        motivo, numero, data)
+        finally:
+            self.presence.liberar_varios(travas)
+
+    def _enviar_revisao(self, container_id: str, tipo_id: str, principal: Path,
+                        editaveis: list[Path], status: str, motivo: str,
+                        numero: int | None, data: date | None) -> Revisao:
         c = self.repo.load_container(container_id)
         doc = self._documento(c, tipo_id)
         atual = doc.atual

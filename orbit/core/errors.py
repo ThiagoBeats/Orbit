@@ -11,4 +11,11 @@ class ArquivoEmUso(OrbitError):
 
 
 class LockHeld(OrbitError):
-    """Outra pessoa/computador esta fazendo upload no mesmo lugar."""
+    """Outra pessoa/computador esta fazendo upload no mesmo lugar.
+
+    `tipo_id`: documento travado. `abandonada`: a trava tem mais de 10 min
+    (a Api usa isso para oferecer "Liberar trava").
+    """
+
+    tipo_id: str | None = None
+    abandonada: bool = False

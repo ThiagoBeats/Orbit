@@ -46,4 +46,7 @@ def run() -> None:
     api.definir_janela(janela)
     # "loaded" roda numa thread própria a cada carga da página (os handlers DOM se perdem)
     janela.events.loaded += lambda: _ligar_arrastar_e_soltar(janela)
+    # apaga a presença ao fechar (síncrono; o JS já pode não responder nessa hora).
+    # O handler devolve None: devolver False cancelaria o fechamento.
+    janela.events.closing += lambda: api.ao_fechar_janela()
     webview.start(gui="edgechromium")
