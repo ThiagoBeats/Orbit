@@ -8,7 +8,6 @@ from orbit.core.errors import OrbitError
 from orbit.core.models import Container
 from orbit.core.repository import Repository
 
-PASTA_ANTIGOS = "Antigos"
 STATUS_APROVACAO = "Para aprovação"
 MSG_SEM_OUTLOOK = "Outlook clássico não encontrado. Use 'Abrir pasta' para anexar manualmente."
 
@@ -50,14 +49,11 @@ class EmailService:
         for sel in selecoes:
             rev = self._revisao(c, sel)
             nome_tipo = self.repo.config.tipo(sel.tipo_id).nome
-            pasta = self.repo.doc_path(c, sel.tipo_id)
-            if rev.arquivada:
-                pasta = pasta / PASTA_ANTIGOS
             arqs = [a for a in rev.arquivos
                     if a.papel == "principal" or sel.incluir_editaveis]
             for a in arqs:
-                caminho = pasta / a.nome
-                if not caminho.is_file():
+                caminho = self.repo.localizar_arquivo(c, sel.tipo_id, rev, a.nome)
+                if caminho is None:
                     raise OrbitError(f"Arquivo não encontrado: {a.nome} "
                                      f"({nome_tipo} - Rev{rev.numero:02d})")
                 anexos.append(caminho)

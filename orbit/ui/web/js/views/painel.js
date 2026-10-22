@@ -126,7 +126,8 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
         ${rev ? '<button type="button" class="btn solid" data-v="email">Enviar por e-mail</button>' : ''}
         <button type="button" class="btn${rev ? '' : ' solid'}" data-v="nova">Nova revisão</button>
         <button type="button" class="btn" data-v="hist">Histórico</button>
-        <button type="button" class="btn" data-v="pasta">Abrir pasta</button></div>`;
+        <button type="button" class="btn" data-v="pasta">${rev && rev.arquivada
+          ? 'Abrir pasta (Antigos)' : 'Abrir pasta'}</button></div>`;
     if (!rev) {
       v.innerHTML = `<div class="viewer-titulo"><b>${esc(d.nome)}</b></div>
         <div class="pdf vazio">${d.nao_se_aplica ? 'Não se aplica' : 'Nenhuma revisão enviada'}</div>
@@ -261,7 +262,12 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
       if (b.dataset.v === 'nova') novaRevisao(d.tipo_id);
       else if (b.dataset.v === 'hist') popupHistorico({ containerId: id, nomesTipos: nomesTipos(),
         documentos: P.dados.documentos, aoEnviar: (tipo, numero) => enviarEmail([{ tipo_id: tipo, numero }]) }).catch(() => {});
-      else if (b.dataset.v === 'pasta') api('abrir_pasta', id, d.tipo_id).catch(() => {});
+      else if (b.dataset.v === 'pasta') {
+        // revisão antiga em exibição: abre a pasta onde estão os arquivos dela (Antigos)
+        const rev = d.revisoes.find(x => x.numero === P.ver) || d.atual || d.revisoes[0];
+        const numero = rev && rev.arquivada ? rev.numero : null;
+        api('abrir_pasta', id, d.tipo_id, numero).catch(() => {});
+      }
       else if (b.dataset.v === 'email') {
         const rev = d.revisoes.find(x => x.numero === P.ver) || d.atual || d.revisoes[0];
         if (rev) enviarEmail([{ tipo_id: d.tipo_id, numero: rev.numero }]);

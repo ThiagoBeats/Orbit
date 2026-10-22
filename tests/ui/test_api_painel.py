@@ -298,3 +298,18 @@ def test_editaveis_precisa_ser_lista(painel):
         assert api.preview_upload(pid, "diagrama_eletrico", p, ruim, None)["ok"] is False
         assert api.enviar_revisao(pid, "diagrama_eletrico", p, ruim, "Aprovado", "", None)["ok"] is False
     assert api.obter_painel(pid)["dados"]["documentos"][0]["atual"] is None
+
+
+def test_abrir_pasta_de_revisao_arquivada_abre_antigos(painel, monkeypatch):
+    api, base, pid, origem = painel
+    chamadas = []
+    monkeypatch.setattr("orbit.ui.api.os.startfile", lambda p: chamadas.append(str(p)),
+                        raising=False)
+    _enviar(api, pid, "diagrama_eletrico", _arq(origem, "a.pdf", "rev0"))
+    _enviar(api, pid, "diagrama_eletrico", _arq(origem, "b.pdf", "rev1"))
+    pasta = base / "Clientes" / "Alfa" / "P-1 - Esteira" / "Diagrama Elétrico"
+    assert api.abrir_pasta(pid, "diagrama_eletrico", 0)["ok"] is True
+    assert api.abrir_pasta(pid, "diagrama_eletrico", 1)["ok"] is True
+    assert api.abrir_pasta(pid, "diagrama_eletrico", None)["ok"] is True
+    assert chamadas == [str(pasta / "Antigos"), str(pasta), str(pasta)]
+    assert api.abrir_pasta(pid, "diagrama_eletrico", 7)["ok"] is False

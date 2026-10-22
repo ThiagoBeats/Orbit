@@ -152,3 +152,14 @@ def test_listar_envios_ordenado(repo, tmp_path):
     assert envios[0]["assunto"] == "as-Prensa"
     assert envios[0]["container_id"] == m.id
     assert [e["container_nome"] for e in svc.listar_envios(cli.id)] == ["Envasadora"]
+
+
+def test_revisao_arquivada_com_arquivo_ainda_na_pasta_do_tipo(ctx):
+    """A reconciliação pode marcar como arquivada sem mover: o e-mail acha nos dois lugares (M1)."""
+    repo, p, origem, rs = ctx
+    _env(rs, p, origem, DIAG, "a.pdf")
+    c = repo.load_container(p.id)
+    c.documentos[DIAG].revisoes[0].arquivada = True
+    repo.save_container(c)
+    d = EmailService(repo, FakeOutlook()).montar(p.id, [SelecaoEnvio(DIAG, 0)])
+    assert [a.parent for a in d.anexos] == [repo.doc_path(c, DIAG)]

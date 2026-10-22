@@ -29,7 +29,7 @@ from orbit.core.naming import parse_rev, sanitize
 from orbit.core.presence import PresenceService
 from orbit.core.reconcile import find_untracked, register_untracked
 from orbit.core.repository import Repository
-from orbit.core.revisions import PASTA_ANTIGOS, RevisionService
+from orbit.core.revisions import RevisionService
 from orbit.ui.fileserver import FileServer
 
 _DIALOGO_ARQUIVO = 10  # webview.FileDialog.OPEN (pywebview 6.x)
@@ -661,10 +661,9 @@ class Api:
         # a lista do JSON é cronológica (append); inverter mantém a ordem no mesmo segundo
         return [e.to_dict() for e in reversed(c.historico)]
 
-    def _arquivo_da_revisao(self, container_id, tipo_id, numero, nome) -> Path:
-        """Arquivo que pertence à revisão (o caminho nunca é montado com texto do JS)."""
-        repo = self._exigir_repo()
-        c = repo.load_container(container_id)
+    def _revisao(self, container_id, tipo_id, numero):
+        """(container, documento, revisão) a partir de ids vindos do JS."""
+        c = self._exigir_repo().load_container(container_id)
         _normalizar_numeros(c)
         doc = c.documentos.get(tipo_id)
         if doc is None:
@@ -673,16 +672,18 @@ class Api:
         rev = next((r for r in doc.revisoes if r.numero == n), None)
         if rev is None:
             raise OrbitError(f"Revisão Rev{n:02d} não encontrada.")
+        return c, doc, rev
+
+    def _arquivo_da_revisao(self, container_id, tipo_id, numero, nome) -> Path:
+        """Arquivo que pertence à revisão (o caminho nunca é montado com texto do JS)."""
+        repo = self._exigir_repo()
+        c, doc, rev = self._revisao(container_id, tipo_id, numero)
         arq = next((a for a in rev.arquivos if a.nome == nome), None)
         if arq is None:
             raise OrbitError("O arquivo não pertence a esta revisão.")
-        pasta = repo.doc_path(c, tipo_id)
-        # a reconciliação pode marcar como arquivada sem mover: procura nos dois lugares
-        locais = [pasta / PASTA_ANTIGOS, pasta] if rev.arquivada else [pasta, pasta / PASTA_ANTIGOS]
-        for p in locais:
-            alvo = p / arq.nome
-            if alvo.is_file():
-                return alvo
+        alvo = repo.localizar_arquivo(c, tipo_id, rev, arq.nome)
+        if alvo is not None:
+            return alvo
         raise OrbitError(f"O arquivo \"{arq.nome}\" não foi encontrado na pasta "
                          f"\"{doc.pasta}\" (pode ter sido movido ou apagado).")
 
@@ -707,12 +708,18 @@ class Api:
         _abrir_no_windows(self._arquivo_da_revisao(container_id, tipo_id, numero, nome))
         return None
 
-    def abrir_pasta(self, container_id, tipo_id) -> dict:
-        return self._chamar(self._abrir_pasta, container_id, tipo_id)
+    def abrir_pasta(self, container_id, tipo_id, numero=None) -> dict:
+        """Abre a pasta do tipo; com `numero`, a pasta onde estão os arquivos dessa revisão
+        (Antigos, para revisão arquivada)."""
+        return self._chamar(self._abrir_pasta, container_id, tipo_id, numero)
 
-    def _abrir_pasta(self, container_id, tipo_id):
+    def _abrir_pasta(self, container_id, tipo_id, numero=None):
         repo = self._exigir_repo()
-        pasta = repo.doc_path(repo.load_container(container_id), tipo_id)
+        if numero is None:
+            pasta = repo.doc_path(repo.load_container(container_id), tipo_id)
+        else:
+            c, _, rev = self._revisao(container_id, tipo_id, numero)
+            pasta = repo.pasta_da_revisao(c, tipo_id, rev)
         if not pasta.is_dir():
             raise OrbitError(f"A pasta não foi encontrada: {pasta}")
         _abrir_no_windows(pasta)

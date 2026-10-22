@@ -15,7 +15,7 @@ from orbit.core.config import SharedConfig
 from orbit.core.errors import LockHeld, OrbitDataError, OrbitError
 from orbit.core.identity import Identity
 from orbit.core.jsonstore import read_json, write_json_atomic
-from orbit.core.models import Cliente, Contato, Container, Documento, Evento
+from orbit.core.models import Cliente, Contato, Container, Documento, Evento, Revisao
 from orbit.core.presence import PresenceService
 from orbit.core.naming import sanitize
 
@@ -24,6 +24,7 @@ PASTA_MAQUINAS = "Máquinas Padrão"
 ARQ_CLIENTE = "cliente.json"
 ARQ_PROJETO = "projeto.json"
 ARQ_MAQUINA = "maquina.json"
+PASTA_ANTIGOS = "Antigos"
 
 LIMITE_PASTA = 60
 
@@ -334,6 +335,30 @@ class Repository:
         if doc is None:
             raise OrbitError(f"Tipo de documento não encontrado: {tipo_id}")
         return self.container_path(c) / doc.pasta
+
+    def localizar_arquivo(self, c: Container, tipo_id: str, rev: Revisao,
+                          nome: str) -> Path | None:
+        """Caminho de um arquivo da revisão, ou None se ele não está em lugar nenhum.
+
+        A reconciliação pode marcar uma revisão como arquivada sem mover o
+        arquivo: procura nos dois lugares, primeiro onde ele deveria estar.
+        """
+        pasta = self.doc_path(c, tipo_id)
+        antigos = pasta / PASTA_ANTIGOS
+        for p in ([antigos, pasta] if rev.arquivada else [pasta, antigos]):
+            if (p / nome).is_file():
+                return p / nome
+        return None
+
+    def pasta_da_revisao(self, c: Container, tipo_id: str, rev: Revisao) -> Path:
+        """Pasta onde estão os arquivos da revisão (Antigos, se arquivada)."""
+        principal = next((a for a in rev.arquivos if a.papel == "principal"), None)
+        for a in ([principal] if principal else []) + list(rev.arquivos):
+            f = self.localizar_arquivo(c, tipo_id, rev, a.nome)
+            if f is not None:
+                return f.parent
+        pasta = self.doc_path(c, tipo_id)
+        return pasta / PASTA_ANTIGOS if rev.arquivada else pasta
 
     def cliente_de(self, c: Container) -> Cliente | None:
         return self.get_cliente(c.cliente_id) if c.cliente_id else None
