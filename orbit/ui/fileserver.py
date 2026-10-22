@@ -73,7 +73,9 @@ class FileServer:
         if not caminho_url.startswith(_PREFIXO):
             return None
         token, _, resto = caminho_url[len(_PREFIXO):].partition("/")
-        if not secrets.compare_digest(token, self._token) or not resto:
+        # compara bytes: compare_digest com str não-ASCII lança TypeError
+        token_ok = secrets.compare_digest(token.encode("utf-8", "replace"), self._token.encode("ascii"))
+        if not token_ok or not resto:
             return None
         rel = urllib.parse.unquote(resto)
         partes = [p for p in rel.replace("\\", "/").split("/") if p]

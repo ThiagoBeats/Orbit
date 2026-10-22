@@ -128,3 +128,27 @@ def test_estado_interno_nao_exposto(caminhos):
 
 def test_definir_janela_nao_exposta_ao_js():
     assert getattr(Api.definir_janela, "_serializable", True) is False
+
+
+def test_troca_de_base_falhando_mantem_estado_anterior(caminhos, tmp_path, monkeypatch):
+    from orbit.ui import api as modulo
+    a, b = tmp_path / "A", tmp_path / "B"
+    a.mkdir(); b.mkdir()
+    api = _api(caminhos, JanelaFalsa((str(a),)))
+    assert api.escolher_pasta_base()["ok"] is True
+    antigo = api._fileserver
+    original = modulo.FileServer.start
+
+    def start_falha(self):
+        raise OSError("porta indisponível")
+
+    monkeypatch.setattr(modulo.FileServer, "start", start_falha)
+    api._janela = JanelaFalsa((str(b),))
+    assert api.escolher_pasta_base()["ok"] is False
+    monkeypatch.setattr(modulo.FileServer, "start", original)
+    assert api._fileserver is antigo and api._base == a
+    assert api.get_settings()["dados"]["pasta_base"] == str(a)
+    url = antigo.url_para(a / ".orbit" / "config.json")
+    import urllib.request
+    with urllib.request.urlopen(url, timeout=5) as r:
+        assert r.status == 200

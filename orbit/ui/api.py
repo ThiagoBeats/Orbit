@@ -74,11 +74,12 @@ class Api:
         if not base.is_dir():
             raise OrbitError(f"A pasta base não foi encontrada ou está inacessível: {base}")
         config = load_shared_config(base)  # cria .orbit/config.json na primeira vez
-        if self._fileserver is not None:
-            self._fileserver.stop()
         fileserver = FileServer(base)
-        fileserver.start()
+        fileserver.start()  # se falhar, o estado anterior continua valendo
+        antigo = self._fileserver
         self._base, self._config, self._fileserver = base, config, fileserver
+        if antigo is not None:
+            antigo.stop()
         self._erro_base = None
 
     def _exigir_base(self) -> Path:
