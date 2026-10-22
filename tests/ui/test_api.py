@@ -152,3 +152,99 @@ def test_troca_de_base_falhando_mantem_estado_anterior(caminhos, tmp_path, monke
     import urllib.request
     with urllib.request.urlopen(url, timeout=5) as r:
         assert r.status == 200
+
+
+# --- clientes e projetos (Tarefa 10) ---------------------------------------
+
+@pytest.fixture
+def api_base(caminhos, tmp_path):
+    base = tmp_path / "Base"
+    base.mkdir()
+    save_user_settings(UserSettings(str(base), "escuro"), caminhos[0])
+    return _api(caminhos), base
+
+
+def _cliente(api, nome, **extra):
+    r = api.criar_cliente({"nome": nome, **extra})
+    assert r["ok"] is True, r
+    return r["dados"]
+
+
+def _projeto(api, cliente_id, codigo, nome, **extra):
+    r = api.criar_projeto(cliente_id, {"codigo": codigo, "nome": nome, **extra})
+    assert r["ok"] is True, r
+    return r["dados"]
+
+
+def test_busca_por_projeto_encontra_cliente(api_base):
+    api, _ = api_base
+    c1 = _cliente(api, "Alfa Ltda")
+    _cliente(api, "Beta SA")
+    _projeto(api, c1["id"], "P-001", "Esteira Transportadora")
+    r = api.listar_clientes("esteira")
+    assert [c["nome"] for c in r["dados"]] == ["Alfa Ltda"]
+    assert len(api.listar_clientes("")["dados"]) == 2
+
+
+def test_busca_ignora_acento(api_base):
+    api, _ = api_base
+    _cliente(api, "Automação Industrial")
+    _cliente(api, "Outro")
+    assert [c["nome"] for c in api.listar_clientes("automacao")["dados"]] == ["Automação Industrial"]
+    assert [c["nome"] for c in api.listar_clientes("AUTOMAÇÃO")["dados"]] == ["Automação Industrial"]
+
+
+def test_listar_clientes_resumo(api_base):
+    api, _ = api_base
+    c = _cliente(api, "Alfa")
+    _projeto(api, c["id"], "P-1", "Um")
+    p2 = _projeto(api, c["id"], "P-2", "Dois")
+    assert api.atualizar_projeto(p2["id"], {"situacao": "concluido"})["ok"] is True
+    item = api.listar_clientes()["dados"][0]
+    assert item["projetos_ativos"] == 1
+    assert item["ultima_emissao"] is None
+    assert set(item) == {"id", "nome", "projetos_ativos", "ultima_emissao"}
+
+
+def test_obter_cliente_e_atualizar_nao_renomeia_pasta(api_base):
+    api, base = api_base
+    c = _cliente(api, "Alfa", contatos=[{"nome": "Ana", "email": "a@x.com"}])
+    _projeto(api, c["id"], "P-1", "Um")
+    r = api.atualizar_cliente(c["id"], {"nome": "Alfa Novo", "contatos": []})
+    assert r["ok"] is True
+    d = api.obter_cliente(c["id"])["dados"]
+    assert d["cliente"]["nome"] == "Alfa Novo" and d["cliente"]["contatos"] == []
+    assert d["projetos"][0]["codigo"] == "P-1" and d["projetos"][0]["erro"] is None
+    assert (base / "Clientes" / "Alfa" / "P-1 - Um").is_dir()
+    assert not (base / "Clientes" / "Alfa Novo").exists()
+
+
+def test_projeto_com_json_corrompido_aparece_com_erro(api_base):
+    api, base = api_base
+    c = _cliente(api, "Alfa")
+    _projeto(api, c["id"], "P-1", "Um")
+    (base / "Clientes" / "Alfa" / "P-1 - Um" / "projeto.json").write_text("{", encoding="utf-8")
+    d = api.obter_cliente(c["id"])["dados"]
+    assert d["projetos"][0]["erro"]
+    assert api.listar_clientes()["ok"] is True
+
+
+def test_atualizar_projeto_com_contatos(api_base):
+    api, _ = api_base
+    c = _cliente(api, "Alfa")
+    p = _projeto(api, c["id"], "P-1", "Um")
+    r = api.atualizar_projeto(p["id"], {"nome": "Um B", "pedido": "99",
+                                        "contatos": [{"nome": "Bia", "email": "b@x.com"}]})
+    assert r["ok"] is True
+    proj = api.obter_cliente(c["id"])["dados"]["projetos"][0]
+    assert proj["nome"] == "Um B"
+
+
+def test_criar_projeto_cliente_inexistente_da_erro(api_base):
+    api, _ = api_base
+    assert api.criar_projeto("nao-existe", {"codigo": "1", "nome": "x"})["ok"] is False
+
+
+def test_clientes_sem_base_da_erro(caminhos):
+    r = _api(caminhos).listar_clientes()
+    assert r["ok"] is False and "pasta base" in r["erro"].lower()

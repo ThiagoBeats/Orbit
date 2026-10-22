@@ -8,15 +8,36 @@ Convenção: todo método público devolve {"ok": True, "dados": ...} ou
 """
 import os
 import traceback
+import unicodedata
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
 from orbit.core.config import (TEMAS, load_shared_config, load_user_settings,
                                save_user_settings)
 from orbit.core.errors import OrbitError
+from orbit.core.identity import current_identity
+from orbit.core.models import Contato
+from orbit.core.repository import Repository
 from orbit.ui.fileserver import FileServer
 
 _DIALOGO_PASTA = 20  # webview.FileDialog.FOLDER (pywebview 6.x)
+
+
+def _normalizar(texto: str) -> str:
+    """Minúsculas e sem acentos, para a busca."""
+    sem = unicodedata.normalize("NFKD", texto or "")
+    return "".join(c for c in sem if not unicodedata.combining(c)).casefold()
+
+
+def _contatos(lista) -> list[Contato]:
+    out = []
+    for c in lista or []:
+        nome = str(c.get("nome", "")).strip()
+        email = str(c.get("email", "")).strip()
+        if nome or email:
+            out.append(Contato(nome, email))
+    return out
 
 
 def caminho_log_padrao() -> Path:
@@ -31,6 +52,7 @@ class Api:
         self._settings = load_user_settings(settings_path)
         self._base: Path | None = None
         self._config = None
+        self._repo: Repository | None = None
         self._fileserver: FileServer | None = None
         self._erro_base: str | None = None
         if self._settings.pasta_base:
@@ -77,7 +99,9 @@ class Api:
         fileserver = FileServer(base)
         fileserver.start()  # se falhar, o estado anterior continua valendo
         antigo = self._fileserver
+        repo = Repository(base, current_identity(), config)
         self._base, self._config, self._fileserver = base, config, fileserver
+        self._repo = repo
         if antigo is not None:
             antigo.stop()
         self._erro_base = None
@@ -132,3 +156,92 @@ class Api:
     def _get_config(self):
         self._exigir_base()
         return self._config.to_dict()
+
+    # --- clientes e projetos ---------------------------------------------
+
+    def _exigir_repo(self) -> Repository:
+        self._exigir_base()
+        return self._repo
+
+    def listar_clientes(self, busca: str = "") -> dict:
+        return self._chamar(self._listar_clientes, busca)
+
+    def _listar_clientes(self, busca):
+        repo = self._exigir_repo()
+        termo = _normalizar(str(busca or "").strip())
+        out = []
+        for c in repo.list_clientes():
+            projetos = repo.list_projetos(c.id)
+            if termo and termo not in _normalizar(c.nome) and not any(
+                    termo in _normalizar(p.nome) for p in projetos):
+                continue
+            datas = [p.ultima_emissao for p in projetos if p.ultima_emissao]
+            out.append({
+                "id": c.id, "nome": c.nome,
+                "projetos_ativos": sum(1 for p in projetos
+                                       if not p.erro and p.situacao == "ativo"),
+                "ultima_emissao": max(datas) if datas else None,
+            })
+        return out
+
+    def criar_cliente(self, dados) -> dict:
+        return self._chamar(self._criar_cliente, dados)
+
+    def _criar_cliente(self, dados):
+        repo = self._exigir_repo()
+        c = repo.create_cliente(str(dados.get("nome", "")), str(dados.get("cnpj", "")),
+                                _contatos(dados.get("contatos")))
+        return c.to_dict()
+
+    def atualizar_cliente(self, id, dados) -> dict:
+        return self._chamar(self._atualizar_cliente, id, dados)
+
+    def _atualizar_cliente(self, id, dados):
+        repo = self._exigir_repo()
+        c = repo.get_cliente(id)
+        if "nome" in dados:
+            c.nome = str(dados["nome"]).strip()
+        if "cnpj" in dados:
+            c.cnpj = str(dados["cnpj"])
+        if "contatos" in dados:
+            c.contatos = _contatos(dados["contatos"])
+        repo.update_cliente(c)
+        return c.to_dict()
+
+    def obter_cliente(self, id) -> dict:
+        return self._chamar(self._obter_cliente, id)
+
+    def _obter_cliente(self, id):
+        repo = self._exigir_repo()
+        return {"cliente": repo.get_cliente(id).to_dict(),
+                "projetos": [asdict(p) for p in repo.list_projetos(id)]}
+
+    def criar_projeto(self, cliente_id, dados) -> dict:
+        return self._chamar(self._criar_projeto, cliente_id, dados)
+
+    def _criar_projeto(self, cliente_id, dados):
+        repo = self._exigir_repo()
+        c = repo.create_projeto(cliente_id, str(dados.get("codigo", "")),
+                                str(dados.get("nome", "")), str(dados.get("pedido", "")),
+                                str(dados.get("responsavel", "")),
+                                _contatos(dados.get("contatos")))
+        if dados.get("situacao") and dados["situacao"] != c.situacao:
+            c = repo.update_dados(c.id, situacao=dados["situacao"])
+        return {"id": c.id, "nome": c.nome, "codigo": c.codigo, "situacao": c.situacao}
+
+    def atualizar_projeto(self, id, dados) -> dict:
+        return self._chamar(self._atualizar_projeto, id, dados)
+
+    def _atualizar_projeto(self, id, dados):
+        repo = self._exigir_repo()
+        campos = {k: dados[k] for k in ("codigo", "nome", "pedido", "responsavel", "situacao")
+                  if k in dados}
+        for k in ("codigo", "nome"):
+            if k in campos and not str(campos[k]).strip():
+                raise OrbitError("Informe o código e o nome do projeto.")
+        if "situacao" in campos and campos["situacao"] not in ("ativo", "concluido"):
+            raise OrbitError(f"Situação inválida: {campos['situacao']}")
+        if "contatos" in dados:
+            campos["contatos"] = _contatos(dados["contatos"])
+        repo.update_dados(id, **campos)
+        return None
