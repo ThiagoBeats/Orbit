@@ -36,7 +36,7 @@ function _cartaoDoc(d, P) {
   return `<div class="${cls}" data-tipo="${esc(d.tipo_id)}">
     <div class="card-topo">${marcar}<div class="t">${esc(d.nome)}</div>
       <button type="button" class="menu-btn" data-menu title="Mais ações">⋯</button></div>
-    <div class="rev">${a ? `REV ${String(a.numero).padStart(2, '0')}` : '—'}</div>
+    <div class="rev">${a ? esc(`REV ${String(a.numero).padStart(2, '0')}`) : '—'}</div>
     <div class="m">${meta}</div>
   </div>`;
 }
@@ -139,7 +139,7 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
     }
     const antiga = rev.arquivada || (d.atual && rev.numero !== d.atual.numero);
     const curtos = d.revisoes.slice(0, 3).map(x => `
-      <div class="hist-item${x.numero === rev.numero ? ' on' : ''}" data-rev="${x.numero}">
+      <div class="hist-item${x.numero === rev.numero ? ' on' : ''}" data-rev="${esc(x.numero)}">
         <b>${formatarRev(x.numero)}</b> · ${esc(formatarDataCurta(x.data))}${x.motivo ? ` · ${esc(x.motivo)}` : ''}</div>`).join('');
     v.innerHTML = `
       <div class="viewer-titulo"><b>${esc(d.nome)} · ${formatarRev(rev.numero)}</b> ${pilulaStatus(rev.status)}
@@ -151,7 +151,7 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
       ${botoes}
       <div class="hist">${curtos}</div>`;
     v.querySelectorAll('[data-abrir]').forEach(b => b.addEventListener('click', () =>
-      api('abrir_no_programa', id, d.tipo_id, rev.numero, b.dataset.abrir)));
+      api('abrir_no_programa', id, d.tipo_id, rev.numero, b.dataset.abrir).catch(() => {})));
     v.querySelectorAll('[data-rev]').forEach(x => x.addEventListener('click', () => {
       P.ver = Number(x.dataset.rev);
       desenharViewer();
@@ -175,13 +175,13 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
         <div class="texto-sec">Este formato não abre dentro do Orbit.</div>
         <button type="button" class="btn solid" id="pn-abrir-prog">Abrir no programa padrão</button></div>`;
       alvo.querySelector('#pn-abrir-prog').addEventListener('click', () =>
-        api('abrir_no_programa', id, d.tipo_id, rev.numero, rev.principal));
+        api('abrir_no_programa', id, d.tipo_id, rev.numero, rev.principal).catch(() => {}));
     }
     if (f.visualizavel) {
       alvo.insertAdjacentHTML('beforeend', `<div class="nome-arquivo"><span title="${esc(f.nome)}">${esc(f.nome)}</span>
         <button type="button" class="link" id="pn-abrir-fora">Abrir no programa padrão</button></div>`);
       alvo.querySelector('#pn-abrir-fora').addEventListener('click', () =>
-        api('abrir_no_programa', id, d.tipo_id, rev.numero, rev.principal));
+        api('abrir_no_programa', id, d.tipo_id, rev.numero, rev.principal).catch(() => {}));
     }
   }
 
@@ -249,8 +249,8 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
       if (!b) return;
       const d = doc(P.sel);
       if (b.dataset.v === 'nova') novaRevisao(d.tipo_id);
-      else if (b.dataset.v === 'hist') popupHistorico({ containerId: id, nomesTipos: nomesTipos() });
-      else if (b.dataset.v === 'pasta') api('abrir_pasta', id, d.tipo_id);
+      else if (b.dataset.v === 'hist') popupHistorico({ containerId: id, nomesTipos: nomesTipos() }).catch(() => {});
+      else if (b.dataset.v === 'pasta') api('abrir_pasta', id, d.tipo_id).catch(() => {});
       else if (b.dataset.v === 'email') _emBreve('Enviar por e-mail');
     });
     el.querySelector('#pn-email-varios').addEventListener('click', () => _emBreve('Enviar por e-mail'));

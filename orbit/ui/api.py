@@ -16,7 +16,7 @@ from pathlib import Path
 
 from orbit.core.config import (TEMAS, load_shared_config, load_user_settings,
                                save_user_settings)
-from orbit.core.errors import OrbitError
+from orbit.core.errors import OrbitDataError, OrbitError
 from orbit.core.identity import current_identity
 from orbit.core.models import Contato, Revisao
 from orbit.core.reconcile import find_untracked
@@ -275,6 +275,7 @@ class Api:
     def _obter_painel(self, container_id):
         repo = self._exigir_repo()
         c = repo.load_container(container_id)
+        _normalizar_numeros(c)
         cliente = repo.cliente_de(c)
         nomes = {t.id: t.nome for t in repo.config.tipos}
         ordem = {t.id: i for i, t in enumerate(repo.config.tipos)}
@@ -330,6 +331,7 @@ class Api:
         """Arquivo que pertence à revisão (o caminho nunca é montado com texto do JS)."""
         repo = self._exigir_repo()
         c = repo.load_container(container_id)
+        _normalizar_numeros(c)
         doc = c.documentos.get(tipo_id)
         if doc is None:
             raise OrbitError(f"Tipo de documento não encontrado: {tipo_id}")
@@ -460,14 +462,33 @@ def _numero_revisao(valor, opcional: bool = False) -> int | None:
 def _arquivos_upload(principal, editaveis) -> tuple[Path, list[Path]]:
     if not isinstance(principal, str) or not principal.strip():
         raise OrbitError("Escolha o arquivo principal.")
-    eds = [Path(e) for e in (editaveis or []) if isinstance(e, str) and e.strip()]
-    return Path(principal), eds
+    if not isinstance(editaveis, list) or not all(isinstance(e, str) for e in editaveis):
+        raise OrbitError("Lista de arquivos editáveis inválida.")
+    return Path(principal), [Path(e) for e in editaveis if e.strip()]
+
+
+def _normalizar_numeros(c) -> None:
+    """Garante números de revisão inteiros antes de usar o container.
+
+    O JSON fica numa pasta compartilhada e pode ser editado à mão: "3" vira 3;
+    qualquer outra coisa é erro de dados (nunca chega ao HTML como texto livre).
+    """
+    for doc in c.documentos.values():
+        for r in doc.revisoes:
+            v = r.numero
+            if isinstance(v, int) and not isinstance(v, bool):
+                continue
+            if isinstance(v, str) and v.strip().isascii() and v.strip().isdigit():
+                r.numero = int(v.strip())
+                continue
+            raise OrbitDataError(f"Dados inválidos ({c.nome}): número de revisão inválido "
+                                 f"em \"{doc.pasta}\". Corrija o arquivo de dados do projeto.")
 
 
 def _rev_dict(r: Revisao) -> dict:
     principal = next((a.nome for a in r.arquivos if a.papel == "principal"), None)
     return {
-        "numero": r.numero, "data": r.data, "status": r.status, "motivo": r.motivo,
+        "numero": int(r.numero), "data": r.data, "status": r.status, "motivo": r.motivo,
         "usuario": r.usuario, "computador": r.computador, "arquivada": r.arquivada,
         "principal": principal,
         "editaveis": [a.nome for a in r.arquivos if a.papel == "editavel"],

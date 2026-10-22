@@ -44,7 +44,7 @@ function popupNovaRevisao({ containerId, doc, subtitulo = '', arquivos = [] }) {
           <div id="nr-editaveis"></div>
           <button type="button" class="btn pequeno" id="nr-add-ed">+ Adicionar editável</button></div>
         <div class="field"><label for="nr-numero">Número da revisão</label>
-          <input type="number" id="nr-numero" min="${sugerido}" max="99" step="1" value="${sugerido}">
+          <input type="number" id="nr-numero" min="${esc(sugerido)}" max="99" step="1" value="${esc(sugerido)}">
           <div class="dica">${atual
             ? `Atual: ${formatarRev(atual.numero)}. Só números maiores que a atual.`
             : 'Primeira revisão deste documento.'}</div></div>

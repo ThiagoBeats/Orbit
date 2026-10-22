@@ -22,7 +22,7 @@ function pilulaStatus(status) {
 }
 
 function formatarRev(n) {
-  return `Rev${String(n).padStart(2, '0')}`;
+  return esc(`Rev${String(n).padStart(2, '0')}`); // número vem do JSON compartilhado
 }
 
 function popupStatus({ containerId, doc }) {

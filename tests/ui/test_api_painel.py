@@ -240,3 +240,61 @@ def test_caminhos_do_drop():
     assert caminhos_do_drop(ev) == ["C:\\x\\a.pdf"]
     assert caminhos_do_drop({}) == []
     assert caminhos_do_drop({"dataTransfer": None}) == []
+
+
+# --- rodada de correção 1 ------------------------------------------------------
+
+def _editar_json(base, alterar):
+    import json
+    f = base / "Clientes" / "Alfa" / "P-1 - Esteira" / "projeto.json"
+    d = json.loads(f.read_text(encoding="utf-8"))
+    alterar(d)
+    f.write_text(json.dumps(d), encoding="utf-8")
+
+
+def test_numero_nao_inteiro_no_json_vira_erro_de_dados(painel):
+    from orbit.core.errors import OrbitDataError
+    api, base, pid, origem = painel
+    _enviar(api, pid, "diagrama_eletrico", _arq(origem, "a.pdf"))
+
+    def injetar(d):
+        d["documentos"]["diagrama_eletrico"]["revisoes"][0]["numero"] = "<img src=x onerror=alert(1)>"
+    _editar_json(base, injetar)
+    r = api.obter_painel(pid)
+    assert r["ok"] is False and "número de revisão inválido" in r["erro"].lower()
+    try:
+        api._obter_painel(pid)
+    except OrbitDataError:
+        pass
+    else:
+        raise AssertionError("esperava OrbitDataError")
+
+
+def test_numero_texto_inteiro_no_json_sai_como_int(painel):
+    api, base, pid, origem = painel
+    _enviar(api, pid, "diagrama_eletrico", _arq(origem, "a.pdf"))
+    _editar_json(base, lambda d: d["documentos"]["diagrama_eletrico"]["revisoes"][0]
+                 .__setitem__("numero", "0"))
+    d = api.obter_painel(pid)["dados"]["documentos"][0]
+    assert d["atual"]["numero"] == 0 and d["revisoes"][0]["numero"] == 0
+    assert type(d["atual"]["numero"]) is int
+
+
+def test_preview_recusa_numero_menor_ou_igual_ao_atual(painel):
+    api, _, pid, origem = painel
+    _enviar(api, pid, "diagrama_eletrico", _arq(origem, "a.pdf"), numero=2)
+    p = _arq(origem, "b.pdf")
+    for n in (0, 2, "1"):
+        r = api.preview_upload(pid, "diagrama_eletrico", p, [], n)
+        assert r == {"ok": False, "erro": "A nova revisão precisa ser maior que a atual (Rev02)."}
+        assert api.enviar_revisao(pid, "diagrama_eletrico", p, [], "Aprovado", "", n) == r
+    assert api.preview_upload(pid, "diagrama_eletrico", p, [], 3)["ok"] is True
+
+
+def test_editaveis_precisa_ser_lista(painel):
+    api, _, pid, origem = painel
+    p = _arq(origem, "a.pdf")
+    for ruim in (r"C:x.dwg", None, {"a": 1}, [5]):
+        assert api.preview_upload(pid, "diagrama_eletrico", p, ruim, None)["ok"] is False
+        assert api.enviar_revisao(pid, "diagrama_eletrico", p, ruim, "Aprovado", "", None)["ok"] is False
+    assert api.obter_painel(pid)["dados"]["documentos"][0]["atual"] is None

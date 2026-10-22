@@ -69,7 +69,7 @@ main.painel { display:flex; gap:20px; padding:4px 32px 40px; }
 .card .t { font-size:12px; letter-spacing:.12em; text-transform:uppercase; font-weight:500; }
 .card .rev { font-size:24px; font-weight:300; margin-top:8px; }
 .card .m { font-size:13px; color:var(--muted); margin-top:8px; display:flex; align-items:center; gap:8px; }
-.card.na { opacity:.4; }
+.card.na > :not(.card-topo):not(.menu-cartao), .card.na .card-topo > :not(.menu-btn):not(.menu-cartao) { opacity:.4; }
 .card.pend { border-style:dashed; }
 .chip { font-size:11px; padding:3px 9px; border-radius:20px; background:var(--surface2); border:1px solid var(--line); }
 .chip.ok { color:var(--ok); } .chip.warn { color:var(--warn); } .chip.info { color:var(--info); } .chip.pend { color:var(--pend); }
@@ -154,7 +154,6 @@ main.painel { display:flex; gap:20px; padding:4px 32px 40px; }
 .menu-cartao { position:absolute; right:10px; top:40px; z-index:5; background:var(--surface2); border:1px solid var(--line); border-radius:8px; box-shadow:var(--shadow); padding:4px; display:flex; flex-direction:column; min-width:170px; }
 .menu-cartao button { background:none; border:1px solid transparent; border-radius:6px; color:var(--text); text-align:left; padding:8px 10px; font-family:inherit; font-size:13px; cursor:pointer; transition:border-color .2s; }
 .menu-cartao button:hover { border-color:var(--line); }
-.card.na .menu-cartao { opacity:1; }
 .viewer { min-width:0; align-self:flex-start; }
 .viewer-titulo { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; font-size:13px; letter-spacing:.06em; }
 .viewer-titulo b { font-weight:500; }

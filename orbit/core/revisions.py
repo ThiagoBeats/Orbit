@@ -166,11 +166,19 @@ class RevisionService:
     def _numero(self, c: Container, tipo_id: str, numero: int | None) -> int:
         return self.sugerir_numero(c, tipo_id) if numero is None else numero
 
+    @staticmethod
+    def _validar_numero(atual: Revisao | None, n: int) -> None:
+        if n < 0 or (atual is not None and n <= atual.numero):
+            raise OrbitError(f"A nova revisão precisa ser maior que a atual "
+                             f"(Rev{atual.numero:02d})." if atual else
+                             "O número da revisão não pode ser negativo.")
+
     # ---------- API ----------
     def preview(self, container_id: str, tipo_id: str, principal: Path, editaveis: list[Path],
                 numero: int | None = None, data: date | None = None) -> UploadPreview:
         c = self.repo.load_container(container_id)
         n = self._numero(c, tipo_id, numero)
+        self._validar_numero(self._documento(c, tipo_id).atual, n)
         nome_p, nomes_e = self._nomes(c, tipo_id, principal, list(editaveis), n,
                                       data or self.repo.agora().date())
         return UploadPreview(n, nome_p, nomes_e)
@@ -187,10 +195,7 @@ class RevisionService:
         n = self._numero(c, tipo_id, numero)
 
         # 1. validações (nada é tocado antes delas)
-        if n < 0 or (atual is not None and n <= atual.numero):
-            raise OrbitError(f"A nova revisão precisa ser maior que a atual "
-                             f"(Rev{atual.numero:02d})." if atual else
-                             "O número da revisão não pode ser negativo.")
+        self._validar_numero(atual, n)
         if not principal.is_file():
             raise OrbitError(f"Arquivo principal não encontrado: {principal}")
         for e in editaveis:
