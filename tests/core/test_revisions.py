@@ -361,3 +361,34 @@ def test_mover_nunca_sobrescreve_destino_que_aparece_depois_da_checagem(tmp_path
     assert src.read_text(encoding="utf-8") == "atual"
     assert dst.read_text(encoding="utf-8") == "outro"
     assert tx.desfazer() == []
+
+
+def test_numero_que_ja_existe_arquivado_e_recusado(ctx, repo):
+    """M2: a reconciliação pode registrar uma revisão arquivada maior que a atual."""
+    from orbit.core.reconcile import find_untracked, register_untracked
+    svc, p, origem = ctx
+    svc.enviar_revisao(p.id, TIPO, _arq(origem, "a.pdf", "r0"), [], "Em elaboração", "m")
+    antigos = repo.doc_path(p, TIPO) / "Antigos"
+    (antigos / "Diagrama velho - Rev05.pdf").write_text("r5", encoding="utf-8")
+    register_untracked(repo, p.id, find_untracked(repo, repo.load_container(p.id)),
+                       "Em elaboração")
+    assert repo.load_container(p.id).documentos[TIPO].atual.numero == 0
+    for chamada in (lambda: svc.preview(p.id, TIPO, _arq(origem, "b.pdf", "x"), [], numero=5),
+                    lambda: svc.enviar_revisao(p.id, TIPO, _arq(origem, "b.pdf", "x"), [],
+                                               "Em elaboração", "m", numero=5)):
+        with pytest.raises(OrbitError, match="Rev05 já existe"):
+            chamada()
+    svc.enviar_revisao(p.id, TIPO, _arq(origem, "b.pdf", "x"), [], "Em elaboração", "m",
+                       numero=3)
+    nums = sorted(r.numero for r in repo.load_container(p.id).documentos[TIPO].revisoes)
+    assert nums == [0, 3, 5]
+
+
+def test_sugestao_pula_numero_arquivado(ctx, repo):
+    from orbit.core.reconcile import find_untracked, register_untracked
+    svc, p, origem = ctx
+    svc.enviar_revisao(p.id, TIPO, _arq(origem, "a.pdf", "r0"), [], "Em elaboração", "m")
+    (repo.doc_path(p, TIPO) / "Antigos" / "X - Rev01.pdf").write_text("r1", encoding="utf-8")
+    register_untracked(repo, p.id, find_untracked(repo, repo.load_container(p.id)),
+                       "Em elaboração")
+    assert svc.sugerir_numero(repo.load_container(p.id), TIPO) == 2

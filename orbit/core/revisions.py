@@ -161,8 +161,13 @@ class RevisionService:
         return doc
 
     def sugerir_numero(self, c: Container, tipo_id: str) -> int:
-        atual = self._documento(c, tipo_id).atual
-        return atual.numero + 1 if atual else 0
+        doc = self._documento(c, tipo_id)
+        atual = doc.atual
+        n = atual.numero + 1 if atual else 0
+        existentes = {r.numero for r in doc.revisoes}
+        while n in existentes:  # pula números de revisões arquivadas maiores que a atual
+            n += 1
+        return n
 
     def _nomes(self, c: Container, tipo_id: str, principal: Path, editaveis: list[Path],
                numero: int, data: date) -> tuple[str, list[str]]:
@@ -172,18 +177,23 @@ class RevisionService:
         return self.sugerir_numero(c, tipo_id) if numero is None else numero
 
     @staticmethod
-    def _validar_numero(atual: Revisao | None, n: int) -> None:
+    def _validar_numero(doc: Documento, n: int) -> None:
+        atual = doc.atual
         if n < 0 or (atual is not None and n <= atual.numero):
             raise OrbitError(f"A nova revisão precisa ser maior que a atual "
                              f"(Rev{atual.numero:02d})." if atual else
                              "O número da revisão não pode ser negativo.")
+        # uma revisão arquivada (ex.: registrada pela reconciliação) pode ser maior que a atual
+        if any(r.numero == n for r in doc.revisoes):
+            raise OrbitError(f"A Rev{n:02d} já existe neste documento (em Antigos). "
+                             "Escolha outro número.")
 
     # ---------- API ----------
     def preview(self, container_id: str, tipo_id: str, principal: Path, editaveis: list[Path],
                 numero: int | None = None, data: date | None = None) -> UploadPreview:
         c = self.repo.load_container(container_id)
         n = self._numero(c, tipo_id, numero)
-        self._validar_numero(self._documento(c, tipo_id).atual, n)
+        self._validar_numero(self._documento(c, tipo_id), n)
         nome_p, nomes_e = self._nomes(c, tipo_id, principal, list(editaveis), n,
                                       data or self.repo.agora().date())
         return UploadPreview(n, nome_p, nomes_e)
@@ -216,7 +226,7 @@ class RevisionService:
         n = self._numero(c, tipo_id, numero)
 
         # 1. validações (nada é tocado antes delas)
-        self._validar_numero(atual, n)
+        self._validar_numero(doc, n)
         if not principal.is_file():
             raise OrbitError(f"Arquivo principal não encontrado: {principal}")
         for e in editaveis:
