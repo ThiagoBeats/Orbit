@@ -425,8 +425,9 @@ class Api:
 
     def _criar_cliente(self, dados):
         repo = self._exigir_repo()
-        c = repo.create_cliente(str(dados.get("nome", "")), str(dados.get("cnpj", "")),
-                                _contatos(dados.get("contatos")))
+        with self._trava_escrita:
+            c = repo.create_cliente(str(dados.get("nome", "")), str(dados.get("cnpj", "")),
+                                    _contatos(dados.get("contatos")))
         return c.to_dict()
 
     def atualizar_cliente(self, id, dados) -> dict:
@@ -434,14 +435,15 @@ class Api:
 
     def _atualizar_cliente(self, id, dados):
         repo = self._exigir_repo()
-        c = repo.get_cliente(id)
-        if "nome" in dados:
-            c.nome = str(dados["nome"]).strip()
-        if "cnpj" in dados:
-            c.cnpj = str(dados["cnpj"]).strip()
-        if "contatos" in dados:
-            c.contatos = _contatos(dados["contatos"])
-        repo.update_cliente(c)
+        with self._trava_escrita:
+            c = repo.get_cliente(id)
+            if "nome" in dados:
+                c.nome = str(dados["nome"]).strip()
+            if "cnpj" in dados:
+                c.cnpj = str(dados["cnpj"]).strip()
+            if "contatos" in dados:
+                c.contatos = _contatos(dados["contatos"])
+            repo.update_cliente(c)
         return c.to_dict()
 
     def obter_cliente(self, id) -> dict:
@@ -479,7 +481,8 @@ class Api:
             campos["situacao"] = _validar_situacao(dados["situacao"])
         if "contatos" in dados:
             campos["contatos"] = _contatos(dados["contatos"])
-        repo.update_dados(id, **campos)
+        with self._trava_escrita:
+            repo.update_dados(id, **campos)
         return None
 
     # --- painel do projeto/máquina -------------------------------------------

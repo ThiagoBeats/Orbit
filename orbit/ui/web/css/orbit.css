@@ -130,6 +130,7 @@ main.painel { display:flex; gap:20px; padding:4px 32px 40px; }
 .modal.erro h2 { color:var(--pend); }
 .close { float:right; color:var(--muted); cursor:pointer; font-size:12px; letter-spacing:.1em; background:none; border:none; font-family:inherit; }
 .close:hover { color:var(--text); }
+.overlay.ocupado .modal > .close { opacity:.4; cursor:default; }
 
 /* ---- Clientes e projetos ------------------------------------------------ */
 .barra { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 32px 0; flex-wrap:wrap; }

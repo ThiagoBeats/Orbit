@@ -6,6 +6,9 @@
  *     ela devolva false ou lance um erro (útil para validar formulários).
  *   - Botão sem "acao" apenas fecha.
  *   - Esc fecha o popup do topo.
+ *   - Enquanto uma "acao" está rodando, Esc, FECHAR ✕ e os botões sem acao
+ *     não fecham o popup (ex.: upload lento: o usuário não pode achar que
+ *     cancelou algo que continua em andamento).
  * confirmar(texto) -> Promise<bool>
  * mostrarErro(mensagem)
  * esc(texto) -> texto seguro para colocar em HTML
@@ -31,8 +34,10 @@ function abrirPopup({ titulo = '', subtitulo = '', corpoHtml = '', botoes = [], 
     </div>`;
 
   let fechado = false;
+  let ocupado = 0; // ações em andamento
   const popup = {
     elemento: overlay.querySelector('.modal'),
+    get ocupado() { return ocupado > 0; },
     fechar() {
       if (fechado) return;
       fechado = true;
@@ -50,8 +55,10 @@ function abrirPopup({ titulo = '', subtitulo = '', corpoHtml = '', botoes = [], 
     el.className = 'btn' + (b.primario ? ' solid' : '');
     el.textContent = b.texto;
     el.addEventListener('click', async () => {
-      if (!b.acao) { popup.fechar(); return; }
+      if (!b.acao) { if (!popup.ocupado) popup.fechar(); return; }
       el.disabled = true;
+      ocupado++;
+      overlay.classList.add('ocupado');
       try {
         const r = await b.acao(popup);
         if (r !== false) popup.fechar();
@@ -59,13 +66,17 @@ function abrirPopup({ titulo = '', subtitulo = '', corpoHtml = '', botoes = [], 
         // erro da Api já foi mostrado; o popup continua aberto
         if (!(e instanceof ErroApi)) console.error(e);
       } finally {
+        ocupado--;
+        if (!ocupado) overlay.classList.remove('ocupado');
         el.disabled = false;
       }
     });
     areaBotoes.appendChild(el);
   }
 
-  overlay.querySelector('[data-fechar]').addEventListener('click', () => popup.fechar());
+  overlay.querySelector('[data-fechar]').addEventListener('click', () => {
+    if (!popup.ocupado) popup.fechar();
+  });
   document.body.appendChild(overlay);
   _popupsAbertos.push(popup);
   const foco = overlay.querySelector('input, select, textarea') || areaBotoes.querySelector('.btn.solid');
@@ -75,7 +86,8 @@ function abrirPopup({ titulo = '', subtitulo = '', corpoHtml = '', botoes = [], 
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && _popupsAbertos.length) {
-    _popupsAbertos[_popupsAbertos.length - 1].fechar();
+    const topo = _popupsAbertos[_popupsAbertos.length - 1];
+    if (!topo.ocupado) topo.fechar(); // ação em andamento: espera terminar
   }
 });
 

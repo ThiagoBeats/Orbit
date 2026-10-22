@@ -375,3 +375,18 @@ def test_falha_de_gravacao_vira_mensagem_clara(api_base, monkeypatch):
     r = api.atualizar_projeto(p["id"], {"nome": "Dois"})
     assert r["ok"] is False and "Erro inesperado" not in r["erro"]
     assert "projeto.json" in r["erro"]
+
+
+def test_atualizar_projeto_usa_trava_de_escrita(api_base, monkeypatch):
+    api, _ = api_base
+    c = _cliente(api, "Alfa")
+    p = _projeto(api, c["id"], "P-1", "Um")
+    original = api._repo.update_dados
+    vistos = []
+
+    def espiao(*a, **k):
+        vistos.append(api._trava_escrita._is_owned())
+        return original(*a, **k)
+    monkeypatch.setattr(api._repo, "update_dados", espiao)
+    assert api.atualizar_projeto(p["id"], {"nome": "Dois"})["ok"]
+    assert vistos == [True]
