@@ -1,7 +1,11 @@
 /* Popup de e-mail (spec §11).
  *
  * popupEmail({containerId, selecoes:[{tipo_id, numero}], nomesTipos}) -> Promise<bool>
- *   true = o rascunho foi aberto no Outlook.
+ *   true = o rascunho foi aberto (no Outlook clássico ou como arquivo .eml).
+ * Sem Outlook clássico (Api.email_outlook_classico), o popup avisa logo ao abrir
+ * que o Orbit vai criar um rascunho .eml com os anexos e abri-lo no programa de
+ * e-mail padrão. Em caso de falha, "Abrir pasta" abre a pasta de cada revisão
+ * marcada (Antigos para revisão antiga).
  * O popup pede à Api todos os arquivos (editáveis incluídos) e deixa o usuário
  * marcar o que vai. Documento desmarcado sai do envio; os editáveis começam
  * desmarcados. Os anexos são refeitos no Python a partir das seleções.
@@ -15,6 +19,8 @@ async function popupEmail({ containerId, selecoes, nomesTipos = {} }) {
     m = await api('montar_email', containerId,
       selecoes.map(s => ({ tipo_id: s.tipo_id, numero: s.numero, incluir_editaveis: true })));
   } catch (e) { return false; }
+  const rc = await _apiQuieta('email_outlook_classico');
+  const semOutlook = !!(rc && rc.ok && rc.dados === false);
 
   return new Promise(resolve => {
     let aberto = false;
@@ -36,9 +42,14 @@ async function popupEmail({ containerId, selecoes, nomesTipos = {} }) {
 
     const popup = abrirPopup({
       titulo: 'Enviar por e-mail',
-      subtitulo: 'O Outlook abre com o rascunho pronto; você revisa e envia por lá.',
+      subtitulo: semOutlook
+        ? 'O rascunho abre no seu programa de e-mail; você revisa e envia por lá.'
+        : 'O Outlook abre com o rascunho pronto; você revisa e envia por lá.',
       classe: 'largo',
       corpoHtml: `
+        ${semOutlook ? `<div class="aviso-email">Outlook clássico não encontrado neste computador.
+          O Orbit vai criar um rascunho de e-mail (arquivo .eml) com os anexos e abri-lo no
+          seu programa de e-mail padrão.</div>` : ''}
         <div class="field"><label for="em-para">Para (separe por ;)</label>
           <input type="text" id="em-para" value="${esc(m.destinatarios.join('; '))}"></div>
         <div class="field"><label for="em-assunto">Assunto</label>
@@ -51,7 +62,7 @@ async function popupEmail({ containerId, selecoes, nomesTipos = {} }) {
         <div class="erro-email oculto" id="em-erro"></div>`,
       botoes: [
         { texto: 'Cancelar' },
-        { texto: 'Abrir no Outlook', primario: true, acao: async p => {
+        { texto: semOutlook ? 'Abrir rascunho (.eml)' : 'Abrir no Outlook', primario: true, acao: async p => {
           const sels = selecaoAtual();
           if (!sels.length) { mostrarErro('Marque ao menos um documento.'); return false; }
           const r = await apiSilenciosa('preparar_email', containerId, {
@@ -98,11 +109,14 @@ async function popupEmail({ containerId, selecoes, nomesTipos = {} }) {
     function mostrarFalha(msg) {
       const caixa = el.querySelector('#em-erro');
       caixa.classList.remove('oculto');
+      const marcadas = selecaoAtual();
+      const alvo = marcadas.length ? marcadas
+        : selecoes.map(s => ({ tipo_id: s.tipo_id, numero: s.numero, incluir_editaveis: false }));
       caixa.innerHTML = `<div>${esc(msg)}</div>
-        <button type="button" class="btn pequeno" id="em-pasta">Abrir pasta</button>`;
+        <button type="button" class="btn pequeno" id="em-pasta">${
+          alvo.length > 1 ? 'Abrir pastas' : 'Abrir pasta'}</button>`;
       caixa.querySelector('#em-pasta').addEventListener('click', () => {
-        const alvo = (selecaoAtual()[0] || selecoes[0]).tipo_id;
-        api('abrir_pasta', containerId, alvo).catch(() => {});
+        api('abrir_pastas_email', containerId, alvo).catch(() => {});
       });
     }
 

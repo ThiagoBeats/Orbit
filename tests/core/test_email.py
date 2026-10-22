@@ -118,17 +118,21 @@ def test_preparar_registra_evento(ctx):
                         "itens": [{"tipo_id": DIAG, "numero": 0}]}
 
 
-def test_outlook_indisponivel_nao_registra(ctx):
+def test_outlook_indisponivel_usa_eml_e_nao_chama_outlook(ctx, monkeypatch, tmp_path_factory):
+    from orbit.core import eml as emlmod
     repo, p, origem, rs = ctx
     _env(rs, p, origem, DIAG, "a.pdf")
+    raiz = tmp_path_factory.mktemp("temp")
+    monkeypatch.setattr(emlmod, "raiz_temporaria", lambda: raiz)
+    abertos = []
+    monkeypatch.setattr("os.startfile", lambda c, *a, **k: abertos.append(c))
     out = FakeOutlook(ok=False)
     svc = EmailService(repo, out)
     sel = [SelecaoEnvio(DIAG, 0)]
     d = svc.montar(p.id, sel)
-    with pytest.raises(OrbitError, match="Outlook clássico não encontrado"):
-        svc.preparar(p.id, d, sel)
-    assert out.abertos == []
-    assert all(e.tipo != "email_preparado" for e in repo.load_container(p.id).historico)
+    assert svc.preparar(p.id, d, sel) == "eml"
+    assert out.abertos == [] and len(abertos) == 1 and abertos[0].endswith(".eml")
+    assert repo.load_container(p.id).historico[-1].tipo == "email_preparado"
 
 
 def test_listar_envios_ordenado(repo, tmp_path):

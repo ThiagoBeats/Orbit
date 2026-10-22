@@ -874,8 +874,38 @@ class Api:
         # os anexos nunca vêm do JS: são refeitos a partir das seleções
         anexos = svc.montar(container_id, sels).anexos
         with self._trava_escrita:
-            svc.preparar(container_id, EmailDraft(destinatarios, assunto, corpo, anexos), sels)
-        return None
+            meio = svc.preparar(container_id, EmailDraft(destinatarios, assunto, corpo, anexos),
+                                sels)
+        return {"meio": meio}
+
+    def email_outlook_classico(self) -> dict:
+        """O Outlook clássico está instalado? Usado para avisar, ao abrir o popup de
+        e-mail, que sem ele será aberto um rascunho .eml. Não abre o Outlook."""
+        return self._chamar(self._email_outlook_classico)
+
+    def _email_outlook_classico(self):
+        instalado = getattr(self._outlook, "instalado", None)
+        try:
+            return bool(instalado() if instalado else self._outlook.disponivel())
+        except Exception:
+            return False
+
+    def abrir_pastas_email(self, container_id, selecoes) -> dict:
+        """Abre a pasta de cada revisão selecionada (Antigos para arquivada), sem
+        repetir. Várias pastas = várias janelas do Explorer: o usuário acha todos os
+        anexos sem procurar. Devolve quantas pastas foram abertas."""
+        return self._chamar(self._abrir_pastas_email, container_id, selecoes)
+
+    def _abrir_pastas_email(self, container_id, selecoes):
+        repo = self._exigir_repo()
+        sels = _validar_selecoes(repo, container_id, selecoes)
+        pastas = EmailService(repo, self._outlook).pastas_dos_documentos(container_id, sels)
+        for pasta in pastas:
+            if not pasta.is_dir():
+                raise OrbitError(f"A pasta não foi encontrada: {pasta}")
+        for pasta in pastas:
+            _abrir_no_windows(pasta)
+        return len(pastas)
 
     def listar_envios(self, cliente_id=None) -> dict:
         return self._chamar(self._listar_envios, cliente_id)

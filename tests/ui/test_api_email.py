@@ -161,13 +161,62 @@ def test_preparar_email_draft_invalido(ctx, draft):
     assert outlook.abertos == []
 
 
-def test_preparar_sem_outlook_devolve_mensagem_do_nucleo(ctx):
+@pytest.fixture
+def startfile(monkeypatch, tmp_path_factory):
+    from orbit.core import eml as emlmod
+    raiz = tmp_path_factory.mktemp("temp") / "Orbit"
+    monkeypatch.setattr(emlmod, "raiz_temporaria", lambda: raiz)
+    abertos = []
+    monkeypatch.setattr("os.startfile", lambda c, *a, **k: abertos.append(str(c)))
+    return abertos
+
+
+def test_preparar_sem_outlook_abre_eml_e_registra(ctx, startfile):
     api, outlook, _, pid, enviar, _ = ctx
     enviar(pid, DIAG, "a.pdf")
     outlook.ok = False
+    r = api.preparar_email(pid, {"destinatarios": ["a@x.com"], "assunto": "a", "corpo": "b"},
+                           [sel()])
+    assert r["ok"] is True, r
+    assert r["dados"] == {"meio": "eml"}
+    assert outlook.abertos == [] and len(startfile) == 1 and startfile[0].endswith(".eml")
+    assert len(api.listar_envios()["dados"]) == 1
+
+
+def test_preparar_com_outlook_informa_meio(ctx, startfile):
+    api, outlook, _, pid, enviar, _ = ctx
+    enviar(pid, DIAG, "a.pdf")
     r = api.preparar_email(pid, {"destinatarios": [], "assunto": "a", "corpo": "b"}, [sel()])
-    assert r["ok"] is False and "Outlook clássico não encontrado" in r["erro"]
-    assert api.listar_envios()["dados"] == []
+    assert r["dados"] == {"meio": "outlook"} and startfile == []
+
+
+def test_email_outlook_classico(ctx):
+    api, outlook, *_ = ctx
+    assert api.email_outlook_classico() == {"ok": True, "dados": True}
+    outlook.ok = False
+    assert api.email_outlook_classico() == {"ok": True, "dados": False}
+
+    class SoRegistro(FakeOutlook):
+        def instalado(self):
+            return False
+
+        def disponivel(self):
+            raise AssertionError("não deve abrir o Outlook só para avisar")
+    api._outlook = SoRegistro()
+    assert api.email_outlook_classico() == {"ok": True, "dados": False}
+
+
+def test_abrir_pastas_email_por_revisao(ctx, startfile):
+    api, _, _, pid, enviar, _ = ctx
+    enviar(pid, DIAG, "a.pdf")
+    enviar(pid, DIAG, "b.pdf")
+    enviar(pid, MEM, "m.pdf")
+    r = api.abrir_pastas_email(pid, [sel(DIAG, 0), sel(DIAG, 1), sel(MEM, 0), sel(DIAG, 1)])
+    assert r["ok"], r
+    assert [s.rsplit("\\", 1)[-1] for s in startfile] == ["Antigos", "Diagrama Elétrico",
+                                                          "Memorial Descritivo"]
+    assert r["dados"] == 3
+    assert api.abrir_pastas_email(pid, "x")["ok"] is False
 
 
 def test_falha_com_vira_erro_amigavel(ctx):

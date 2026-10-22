@@ -1,15 +1,16 @@
 """Montagem do e-mail de envio de documentos e registro do envio no histórico."""
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from orbit.core import eml
 from orbit.core.errors import OrbitError
 from orbit.core.models import Container
 from orbit.core.repository import Repository
 
 STATUS_APROVACAO = "Para aprovação"
-MSG_SEM_OUTLOOK = "Outlook clássico não encontrado. Use 'Abrir pasta' para anexar manualmente."
 
 
 @dataclass
@@ -73,15 +74,61 @@ class EmailService:
         return f"{base} - Documentos"
 
     def preparar(self, container_id: str, draft: EmailDraft,
-                 selecoes: list[SelecaoEnvio]) -> None:
-        if not self.outlook.disponivel():
-            raise OrbitError(MSG_SEM_OUTLOOK)
-        self.outlook.abrir_rascunho(draft)
+                 selecoes: list[SelecaoEnvio]) -> str:
+        """Abre o rascunho e registra `email_preparado`. Devolve o meio usado.
+
+        "outlook": Outlook clássico via COM. "eml": sem Outlook clássico, um .eml
+        (X-Unsent) com os anexos embutidos, numa pasta nova em %TEMP%/Orbit,
+        aberto no programa de e-mail padrão. O evento só é gravado depois que a
+        abertura deu certo.
+        """
+        if self.outlook.disponivel():
+            self.outlook.abrir_rascunho(draft)
+            meio = "outlook"
+        else:
+            self._abrir_eml(draft)
+            meio = "eml"
         with self.repo.editar_container(container_id) as c:
             c.historico.append(self.repo.evento("email_preparado", {
                 "destinatarios": list(draft.destinatarios), "assunto": draft.assunto,
                 "itens": [{"tipo_id": s.tipo_id, "numero": s.numero} for s in selecoes]}))
             self.repo.save_container(c)
+        return meio
+
+    def _abrir_eml(self, draft: EmailDraft) -> None:
+        raiz = eml.raiz_temporaria()
+        base = Path(os.path.realpath(self.repo.base))
+        if Path(os.path.realpath(raiz)).is_relative_to(base):
+            raise OrbitError("A pasta temporária do Windows fica dentro da pasta base; "
+                             "o rascunho de e-mail não foi criado.")
+        arquivo = eml.escrever_eml(draft, raiz)
+        try:
+            os.startfile(str(arquivo))
+        except OSError as e:
+            pasta = arquivo.parent
+            try:
+                os.startfile(str(pasta))
+                aberta = "A pasta com o rascunho foi aberta"
+            except OSError:
+                aberta = "O rascunho está na pasta"
+            raise OrbitError(
+                f"Outlook clássico não encontrado e o Windows não conseguiu abrir o "
+                f"rascunho de e-mail (.eml) ({e}). {aberta}: {pasta}. Abra o arquivo "
+                f"\"{arquivo.name}\" no seu programa de e-mail; os anexos já estão nele.")
+
+    def pastas_dos_documentos(self, container_id: str,
+                              selecoes: list[SelecaoEnvio]) -> list[Path]:
+        """Pastas onde estão os arquivos das revisões selecionadas, sem repetir.
+
+        Revisão arquivada: Antigos (ou onde o arquivo realmente está).
+        """
+        c = self.repo.load_container(container_id)
+        out: list[Path] = []
+        for sel in selecoes:
+            pasta = self.repo.pasta_da_revisao(c, sel.tipo_id, self._revisao(c, sel))
+            if pasta not in out:
+                out.append(pasta)
+        return out
 
     def listar_envios(self, filtro_cliente_id: str | None = None) -> list[dict]:
         pares: list[tuple[str | None, str]] = []  # (nome do cliente, id do container)
