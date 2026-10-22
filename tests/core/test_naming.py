@@ -33,3 +33,6 @@ def test_fit_base_name_respeita_240(tmp_path):
     curto = fit_base_name(tmp_path, base, " - Editavel 2.drawio")
     assert len(str(tmp_path / (curto + " - Editavel 2.drawio"))) <= 240
     assert curto.endswith(" - 221026 - Rev00")
+
+def test_sanitize_barra_invertida():
+    assert sanitize("a\b") == "a-b"

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from orbit.core.errors import OrbitError
 
-_PROIBIDOS = re.compile(r'[\/:*?"<>|]')
+_PROIBIDOS = re.compile(r'[\\/:*?"<>|]')
 _ESPACOS = re.compile(r" {2,}")
 _REV_RE = re.compile(r" - Rev(\d{2})(?: - Editavel(?: \d+)?)?\.[^.]+$", re.IGNORECASE)
 _FIM_BASE_RE = re.compile(r" - \d{6} - Rev\d{2,}$")
