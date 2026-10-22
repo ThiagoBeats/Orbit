@@ -1,7 +1,7 @@
 /* Envios: e-mails preparados (registrados no histórico), com filtro por cliente. */
 
 Orbit.views.envios = async (el, _id, aindaAtual) => {
-  const clientes = await api('listar_clientes', '');
+  const clientes = (await api('listar_clientes', '')).filter(c => !c.erro && c.id);
   if (!aindaAtual()) return;
   el.innerHTML = `
     <div class="crumb">Orbit</div>

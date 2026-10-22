@@ -170,3 +170,14 @@ def test_registrar_valida_forma(painel):
     assert api.registrar(pid, "x", "Aprovado")["ok"] is False
     assert api.registrar(pid, [{"tipo_id": "lista_tags", "nome": nome}], "Inexistente")["ok"] is False
     assert api.registrar(pid, [{"tipo_id": 1, "nome": nome}], "Aprovado")["ok"] is False
+
+
+@pytest.mark.parametrize("nome,esperado", [
+    ("PREV 2.pdf", None), ("Rev 3.pdf", 3), ("desenho-rev4.pdf", 4),
+    ("Projeto_Rev06.pdf", 6), ("abreviado rev2.pdf", 2), ("XREV 5.pdf", None),
+])
+def test_rev_solto_exige_inicio_de_palavra(painel, nome, esperado):
+    api, _, _, origem = painel
+    r = api.preparar_importacao([_arq(origem, nome)])
+    assert r["ok"] is True
+    assert r["dados"][0]["rev_detectada"] == esperado

@@ -178,14 +178,17 @@ class Repository:
             raise OrbitDataError(f"Dados do cliente inválidos ({path.parent.name}): "
                                  f"campo ausente ou incorreto: {e}")
 
-    def list_clientes(self) -> list[Cliente]:
+    def list_clientes(self, erros: list[tuple[str, str]] | None = None) -> list[Cliente]:
+        """Clientes legíveis. `erros`, se dado, recebe (nome da pasta, motivo) dos ilegíveis."""
         raiz = self.base / PASTA_CLIENTES
         out = []
         if raiz.is_dir():
             for f in sorted(raiz.glob(f"*/{ARQ_CLIENTE}")):
                 try:
                     c = self._load_cliente(f)
-                except OrbitDataError:
+                except OrbitDataError as e:
+                    if erros is not None:
+                        erros.append((f.parent.name, str(e)))
                     continue
                 self._idx_clientes[c.id] = f
                 out.append(c)

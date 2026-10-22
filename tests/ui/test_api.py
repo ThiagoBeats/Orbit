@@ -203,7 +203,8 @@ def test_listar_clientes_resumo(api_base):
     item = api.listar_clientes()["dados"][0]
     assert item["projetos_ativos"] == 1
     assert item["ultima_emissao"] is None
-    assert set(item) == {"id", "nome", "projetos_ativos", "ultima_emissao"}
+    assert set(item) == {"id", "nome", "projetos_ativos", "ultima_emissao", "erro"}
+    assert item["erro"] is None
 
 
 def test_obter_cliente_e_atualizar_nao_renomeia_pasta(api_base):
@@ -390,3 +391,25 @@ def test_atualizar_projeto_usa_trava_de_escrita(api_base, monkeypatch):
     monkeypatch.setattr(api._repo, "update_dados", espiao)
     assert api.atualizar_projeto(p["id"], {"nome": "Dois"})["ok"]
     assert vistos == [True]
+
+
+def test_cliente_ilegivel_nao_derruba_a_lista(api_base, monkeypatch):
+    api, base = api_base
+    a = _cliente(api, "Alfa")
+    b = _cliente(api, "Beta")
+    _cliente(api, "Gama")
+    (base / "Clientes" / "Gama" / "cliente.json").write_text("{quebrado", encoding="utf-8")
+    original = api._repo.list_projetos
+
+    def sem_permissao(cid):
+        if cid == b["id"]:
+            raise PermissionError(13, "Acesso negado")
+        return original(cid)
+    monkeypatch.setattr(api._repo, "list_projetos", sem_permissao)
+    r = api.listar_clientes("")
+    assert r["ok"] is True, r
+    por_nome = {c["nome"]: c for c in r["dados"]}
+    assert set(por_nome) == {"Alfa", "Beta", "Gama"}
+    assert por_nome["Alfa"].get("erro") is None and por_nome["Alfa"]["id"] == a["id"]
+    assert "Acesso negado" in por_nome["Beta"]["erro"]
+    assert por_nome["Gama"]["erro"] and por_nome["Gama"]["id"] == ""

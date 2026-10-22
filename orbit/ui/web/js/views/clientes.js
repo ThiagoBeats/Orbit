@@ -31,7 +31,9 @@ Orbit.views.clientes = async (el, _id, aindaAtual) => {
         : 'Nenhum cliente ainda. Use "Novo cliente" para começar.'}</p>`;
       return;
     }
-    lista.innerHTML = clientes.map(c => `
+    lista.innerHTML = clientes.map(c => c.erro ? `
+      <div class="card erro-card"><div class="t">${esc(c.nome)}</div>
+        <div class="m">${esc(c.erro)}</div></div>` : `
       <a class="card cartao-link" href="#/cliente/${encodeURIComponent(c.id)}">
         <div class="t">${esc(c.nome)}</div>
         <div class="m">${c.projetos_ativos} ${c.projetos_ativos === 1 ? 'projeto ativo' : 'projetos ativos'}</div>
@@ -50,7 +52,7 @@ Orbit.views.clientes = async (el, _id, aindaAtual) => {
     if (c) await carregar();
   });
   el.querySelector('#cli-novo-projeto').addEventListener('click', async () => {
-    const todos = await api('listar_clientes', '');
+    const todos = (await api('listar_clientes', '')).filter(c => !c.erro && c.id);
     if (!todos.length) { mostrarErro('Crie um cliente antes de criar um projeto.'); return; }
     const p = await popupDadosProjeto({ clientes: todos });
     if (p) await carregar();

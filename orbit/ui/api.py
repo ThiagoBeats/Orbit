@@ -58,7 +58,9 @@ def _contatos(lista) -> list[Contato]:
     return out
 
 
-_REV_SOLTO = re.compile(r"REV\s*(\d+)", re.IGNORECASE)
+# "REV" no início de uma palavra (como \b, mas "_" também separa: "Projeto_Rev03");
+# "PREV 2" não é revisão.
+_REV_SOLTO = re.compile(r"(?<![^\W_])REV\s*(\d+)", re.IGNORECASE)
 
 SITUACOES = ("ativo", "concluido")
 
@@ -405,9 +407,18 @@ class Api:
     def _listar_clientes(self, busca):
         repo = self._exigir_repo()
         termo = _normalizar(str(busca or "").strip())
+        ilegiveis: list[tuple[str, str]] = []
         out = []
-        for c in repo.list_clientes():
-            projetos = repo.list_projetos(c.id)
+        for c in repo.list_clientes(ilegiveis):
+            try:
+                projetos = repo.list_projetos(c.id)
+            except (OrbitError, OSError) as e:
+                # uma pasta de cliente sem acesso não pode derrubar a lista toda
+                if not termo or termo in _normalizar(c.nome):
+                    out.append({"id": c.id, "nome": c.nome, "projetos_ativos": 0,
+                                "ultima_emissao": None,
+                                "erro": f"Não foi possível ler os projetos: {e}"})
+                continue
             if termo and termo not in _normalizar(c.nome) and not any(
                     termo in _normalizar(p.nome) for p in projetos):
                 continue
@@ -417,7 +428,13 @@ class Api:
                 "projetos_ativos": sum(1 for p in projetos
                                        if not p.erro and p.situacao == "ativo"),
                 "ultima_emissao": max(datas) if datas else None,
+                "erro": None,
             })
+        for pasta, motivo in ilegiveis:
+            if not termo or termo in _normalizar(pasta):
+                out.append({"id": "", "nome": pasta, "projetos_ativos": 0,
+                            "ultima_emissao": None, "erro": motivo})
+        out.sort(key=lambda x: x["nome"].casefold())
         return out
 
     def criar_cliente(self, dados) -> dict:
