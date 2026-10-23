@@ -176,9 +176,11 @@ class BackupService:
         if destino is None:
             raise OrbitError("Nenhum backup configurado.")
         chave = str(destino).casefold()
-        bid = self._ids.get(chave) or id_do_backup(destino)
-        if bid != "sem-id":
-            self._ids[chave] = bid  # fora do ar, continua usando o id já conhecido
+        bid = id_do_backup(destino)  # lido do disco: outro HD no mesmo caminho tem outro id
+        if bid == "sem-id":
+            bid = self._ids.get(chave, bid)  # fora do ar: usa o último id conhecido
+        else:
+            self._ids[chave] = bid
         par = f"{id_par(self.base, destino)}-{bid[:12]}"
         if sem_retrato:
             # recuperação: sem retrato toda diferença vira divergência (spec §8)
