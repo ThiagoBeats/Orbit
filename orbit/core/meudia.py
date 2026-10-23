@@ -364,3 +364,59 @@ class MeuDiaService:
             total += sum(1 for d in c.documentos.values()
                          if not d.nao_se_aplica and d.atual is None)
         return total
+
+    # ---------- lembretes (guardados no arquivo pessoal) ----------
+    def lembretes(self) -> list:
+        from orbit.core.lembretes import Lembrete
+        return [Lembrete.from_dict(d) for d in self._dados_pessoais()["lembretes"]
+                if not d.get("excluido")]
+
+    def salvar_lembrete(self, dados: dict):
+        from orbit.core.lembretes import Lembrete, ler_data, validar_recorrencia
+        if not isinstance(dados, dict):
+            raise OrbitError("Lembrete inválido.")
+        texto = dados.get("texto")
+        texto = texto.strip() if isinstance(texto, str) else ""
+        if not texto:
+            raise OrbitError("Escreva o texto do lembrete.")
+        quando = ler_data(dados.get("quando")).strftime("%Y-%m-%dT%H:%M")
+        rec = validar_recorrencia(dados.get("recorrencia"))
+        container_id = self._validar_container(dados.get("container_id"))
+        agora = self._agora_iso()
+        lid = dados.get("id")
+        with self._editar_pessoal() as d:
+            atual = next((x for x in d["lembretes"] if lid and x.get("id") == lid), None)
+            if lid and atual is None:
+                raise OrbitError("Lembrete não encontrado.")
+            if atual is not None:
+                lem = Lembrete.from_dict(atual)
+                lem.texto, lem.quando, lem.recorrencia = texto, quando, rec
+                lem.container_id = container_id
+                lem.adiado_ate, lem.ultimo_disparo, lem.ativo = None, None, True
+            else:
+                lem = Lembrete(uuid4().hex, texto, container_id, self.identity.usuario, quando,
+                               rec, criado_em=agora)
+            lem.alterado_em = agora
+            d["lembretes"] = [x for x in d["lembretes"] if x.get("id") != lem.id] + [lem.to_dict()]
+        return lem
+
+    def excluir_lembrete(self, lembrete_id: str) -> None:
+        self.aplicar(lembrete_id, lambda lem: _marcar_excluido(lem))
+
+    def aplicar(self, lembrete_id: str, func):
+        """Aplica `func(lembrete) -> lembrete` e grava, sob a trava (adiar, concluir...)."""
+        from orbit.core.lembretes import Lembrete
+        with self._editar_pessoal() as d:
+            atual = next((x for x in d["lembretes"] if x.get("id") == lembrete_id), None)
+            if atual is None:
+                raise OrbitError("Lembrete não encontrado.")
+            novo = func(Lembrete.from_dict(atual))
+            novo.alterado_em = self._agora_iso()
+            d["lembretes"] = [x for x in d["lembretes"] if x.get("id") != lembrete_id] + [
+                novo.to_dict()]
+        return novo
+
+
+def _marcar_excluido(lem):
+    lem.excluido = True
+    return lem
