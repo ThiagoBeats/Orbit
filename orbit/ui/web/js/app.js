@@ -142,7 +142,7 @@ function embutirLogos(raiz = document) {
 /* ---- Cabeçalho -------------------------------------------------------- */
 
 const SECAO_DA_ROTA = {
-  clientes: 'clientes', cliente: 'clientes', projeto: 'clientes',
+  inicio: 'inicio', clientes: 'clientes', cliente: 'clientes', projeto: 'clientes',
   maquinas: 'maquinas', maquina: 'maquinas',
   envios: 'envios', config: 'config', log: 'log',
 };
@@ -266,16 +266,16 @@ function mostrarDetalheConexao(r) {
 /* ---- Roteador --------------------------------------------------------- */
 
 const TITULOS = {
-  clientes: 'Clientes', cliente: 'Cliente', projeto: 'Projeto',
+  inicio: 'Início', clientes: 'Clientes', cliente: 'Cliente', projeto: 'Projeto',
   maquinas: 'Máquinas Padrão', maquina: 'Máquina', envios: 'Envios', config: 'Configurações',
   log: 'Log de ações',
 };
 
 function lerRota() {
   const partes = location.hash.replace(/^#\/?/, '').split('/');
-  const nome = partes[0] || 'clientes';
+  const nome = partes[0] || 'inicio';
   const id = partes.length > 1 ? decodeURIComponent(partes.slice(1).join('/')) : null;
-  return { nome: TITULOS[nome] ? nome : 'clientes', id };
+  return { nome: TITULOS[nome] ? nome : 'inicio', id };
 }
 
 function irPara(hash) {
@@ -398,7 +398,7 @@ async function recarregar() {
   Orbit.config = await api('get_config');
   atualizarLogoEmpresa();
   ativarNavegacao(true);
-  if (!location.hash) location.hash = '#/clientes';
+  if (!location.hash) location.hash = '#/inicio';
   await renderizar();
   testarConexao({ falha: true }); // sem await: não atrasa a primeira tela
   atualizarIndicadorBackup(false);

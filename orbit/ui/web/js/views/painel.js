@@ -86,6 +86,7 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
       ${n > 0 ? `<div class="faixa-aviso"><span>${n} ${n === 1 ? 'arquivo na pasta não está registrado'
         : 'arquivos na pasta não estão registrados'}</span>
         <button type="button" class="btn pequeno" id="pn-revisar">Revisar</button></div>` : ''}
+      <div id="pn-onde-parei"></div>
       <div class="stats">
         <div class="stat"><div class="v">${r.emitidos}/${r.aplicaveis}</div><div class="l">Emitidos</div></div>
         <div class="stat"><div class="v">${esc(formatarDataCurta(r.ultima_atualizacao))}</div><div class="l">Última atualização</div></div>
@@ -102,10 +103,13 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
           <div class="grid">${P.dados.documentos.map(d => _cartaoDoc(d, P)).join('')}</div>
         </div>
         <div class="viewer" id="pn-viewer"></div>
-      </main>`;
+      </main>
+      <div class="pagina" id="pn-anotacoes"></div>`;
     atualizarSelecao();
     ligar();
     desenharViewer();
+    montarAnotacoesProjeto(el.querySelector('#pn-onde-parei'), el.querySelector('#pn-anotacoes'), id)
+      .catch(() => {});
   }
 
   function atualizarSelecao() {

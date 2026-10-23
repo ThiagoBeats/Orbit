@@ -292,3 +292,47 @@ main.painel { display:flex; gap:20px; padding:4px 32px 40px; }
 @keyframes ab-desenha { from { stroke-dasharray:0 300; } to { stroke-dasharray:20.3 7.5; } }
 @keyframes ab-roda { to { stroke-dashoffset:-55.6; } }
 @keyframes ab-aparece { to { opacity:1; } }
+
+/* ---- Início / Meu dia ---- */
+.topo-inicio { display:flex; justify-content:space-between; align-items:flex-end; gap:20px; padding:28px 32px 6px; flex-wrap:wrap; }
+.topo-inicio h1 { padding:0; font-size:26px; }
+.topo-inicio .sub { color:var(--muted); font-size:13px; margin-top:4px; }
+.topo-inicio .stats { padding:0; }
+.cor-ok { color:var(--ok); } .cor-warn { color:var(--warn); } .cor-pend { color:var(--pend); }
+main.inicio { display:grid; grid-template-columns:1.25fr 1fr; gap:18px; padding:16px 32px 32px; }
+.painel-inicio { margin-bottom:18px; }
+.cab-painel { display:flex; justify-content:space-between; align-items:center; font-size:12px; letter-spacing:.16em; text-transform:uppercase; font-weight:500; color:var(--muted); margin-bottom:12px; }
+.nav-dia { display:flex; gap:6px; }
+.add-item { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+.add-item input { flex:1; min-width:200px; }
+.item { display:flex; align-items:flex-start; gap:10px; padding:9px 4px; border-bottom:1px solid var(--line); }
+.item:last-child { border-bottom:none; }
+.item .chk { width:18px; height:18px; border:1.5px solid var(--muted); border-radius:5px; flex:none; margin-top:1px; display:flex; align-items:center; justify-content:center; font-size:12px; background:transparent; color:var(--accent-text); cursor:pointer; padding:0; }
+.item .chk.vazio { border-color:transparent; cursor:default; }
+.item.feito .chk { background:var(--ok); border-color:var(--ok); }
+.item.feito .texto { color:var(--muted); text-decoration:line-through; }
+.item .txt { flex:1; line-height:1.4; }
+.item .texto { cursor:text; }
+.item input.edicao { width:100%; }
+.item .menu-btn { opacity:.6; }
+.tag { font-size:10px; padding:2px 8px; border-radius:20px; border:1px solid var(--line); background:var(--surface2); white-space:nowrap; margin-left:6px; }
+.t-pesq { color:var(--info); } .t-def { color:var(--warn); } .t-ins { color:var(--ok); } .t-par { color:var(--accent); }
+.proj { font-size:11px; color:var(--muted); text-decoration:none; }
+a.proj:hover { color:var(--text); }
+.lembrete { display:flex; gap:10px; align-items:center; padding:8px 4px; border-bottom:1px solid var(--line); cursor:pointer; }
+.lembrete .hora { font-size:12px; color:var(--accent); min-width:96px; }
+.projcard { display:block; padding:10px 4px; border-bottom:1px solid var(--line); color:var(--text); text-decoration:none; }
+.projcard .n { font-weight:500; } .projcard .p { color:var(--muted); font-size:12px; margin-top:4px; }
+.ideia { padding:9px 4px; border-bottom:1px solid var(--line); }
+.faixa-parei { margin:12px 32px 0; padding:10px 16px; border:1px solid var(--accent); border-radius:12px; background:color-mix(in srgb, var(--accent) 10%, var(--surface)); font-size:13px; }
+.grupo-anot { margin-top:10px; }
+.autor { font-size:11px; margin-top:2px; }
+.linha-campos { display:flex; gap:12px; }
+.dias-semana { display:flex; gap:10px; flex-wrap:wrap; }
+.texto-lembrete { font-size:16px; }
+@media (max-width:900px) { main.inicio { grid-template-columns:1fr; } }
+.add-item input, .add-item select, .item input.edicao { background:var(--surface2); border:1px solid var(--line); border-radius:8px; padding:9px 10px; font-family:inherit; font-size:13px; color:var(--text); outline:none; }
+.add-item input:focus, .add-item select:focus, .item input.edicao:focus { border-color:var(--accent); }
+.linha-campos .field { flex:1; }
+.field.dias-semana label { display:flex; align-items:center; gap:4px; text-transform:none; letter-spacing:0; font-size:13px; color:var(--text); margin:0; }
+.field.dias-semana input { width:auto; }
