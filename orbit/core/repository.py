@@ -59,14 +59,53 @@ def _arquivo_de(tipo: str) -> str:
 
 class Repository:
     def __init__(self, base: Path, identity: Identity, config: SharedConfig,
-                 agora: Callable[[], datetime] = datetime.now):
+                 agora: Callable[[], datetime] = datetime.now, log=None,
+                 ao_alterar: Callable[[str, str | None], None] | None = None,
+                 registrar: Callable[[BaseException], None] | None = None):
         self.base = Path(base)
         self.identity = identity
         self.config = config
         self.agora = agora
+        self.log = log                # ActionLog (opcional): ações vão para o log geral
+        self.ao_alterar = ao_alterar  # aviso depois de gravar (espelhamento do backup)
+        self.registrar = registrar    # falhas que não podem desfazer a operação
         self._idx_containers: dict[str, Path] = {}  # id -> caminho do JSON
         self._idx_clientes: dict[str, Path] = {}
         self._travas_da_thread = threading.local()  # ids de container travados nesta thread
+
+    # ---------- log e aviso de mudança ----------
+    def _falha(self, e: BaseException) -> None:
+        if self.registrar is not None:
+            try:
+                self.registrar(e)
+            except Exception:
+                pass
+
+    def _logar(self, acao: str, detalhes: dict) -> None:
+        """Grava no log geral; uma falha aqui nunca desfaz a operação já gravada."""
+        if self.log is None:
+            return
+        try:
+            self.log.registrar_acao(acao, detalhes)
+        except Exception as e:
+            self._falha(e)
+
+    def _avisar(self, escopo: str, id: str | None) -> None:
+        if self.ao_alterar is None:
+            return
+        try:
+            self.ao_alterar(escopo, id)
+        except Exception as e:
+            self._falha(e)
+
+    def _detalhes_container(self, c: Container) -> dict:
+        cliente_nome = None
+        if c.cliente_id:
+            try:
+                cliente_nome = self.get_cliente(c.cliente_id).nome
+            except OrbitError:
+                pass
+        return {"container_id": c.id, "container_nome": c.nome, "cliente_nome": cliente_nome}
 
     # ---------- utilitários ----------
     def evento(self, tipo: str, dados: dict) -> Evento:
@@ -167,6 +206,8 @@ class Repository:
             self._desfazer_pastas(raiz, [])  # sem o JSON, a pasta vazia impediria nova tentativa
             raise
         self._idx_clientes[cliente.id] = raiz / ARQ_CLIENTE
+        self._logar("cliente_criado", {"cliente_id": cliente.id, "cliente_nome": cliente.nome})
+        self._avisar("cliente", cliente.id)
         return cliente
 
     @staticmethod
@@ -203,6 +244,8 @@ class Repository:
         if not sanitize(cliente.nome):
             raise OrbitError("Informe o nome do cliente.")
         write_json_atomic(caminho, cliente.to_dict())  # a pasta não é renomeada
+        self._logar("cliente_alterado", {"cliente_id": cliente.id, "cliente_nome": cliente.nome})
+        self._avisar("cliente", cliente.id)
 
     # ---------- containers ----------
     def _novo_container(self, raiz: Path, c: Container) -> Container:
@@ -226,6 +269,9 @@ class Repository:
             self._desfazer_pastas(raiz, criadas)
             raise
         self._idx_containers[c.id] = caminho
+        self._logar("projeto_criado" if c.tipo == "projeto" else "maquina_criada",
+                    self._detalhes_container(c))
+        self._avisar("container", c.id)
         return c
 
     def _pasta_cliente(self, cliente: Cliente) -> Path:
@@ -324,7 +370,15 @@ class Repository:
         with self.trava_container(c.id):
             caminho = self._find("_idx_containers", self._scan_containers, c.id,
                                  "Projeto ou máquina")
+            try:
+                antes = len(read_json(caminho).get("historico") or [])
+            except (OrbitDataError, AttributeError, TypeError):
+                antes = 0
             write_json_atomic(caminho, c.to_dict())
+        detalhes = self._detalhes_container(c)
+        for ev in c.historico[antes:]:
+            self._logar(ev.tipo, {**ev.dados, **detalhes})
+        self._avisar("container", c.id)
 
     def container_path(self, c: Container) -> Path:
         if c.tipo == "projeto":
