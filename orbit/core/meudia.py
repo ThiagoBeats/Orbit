@@ -328,7 +328,7 @@ class MeuDiaService:
         for n in self.todas_anotacoes():
             if n.tipo == "onde_parei" and n.usuario == eu:
                 atual = ultimo.get(n.container_id)
-                if atual is None or n.alterado_em > atual.alterado_em:
+                if atual is None or n.alterado_em >= atual.alterado_em:  # empate: a mais nova
                     ultimo[n.container_id] = n
         out = []
         for cid, it in ultimo.items():
@@ -339,8 +339,10 @@ class MeuDiaService:
 
     def ultimo_onde_parei(self, container_id: str) -> Item | None:
         """A mais recente de qualquer pessoa (faixa no topo do painel do projeto)."""
-        notas = [n for n in self.anotacoes(container_id) if n.tipo == "onde_parei"]
-        return max(notas, key=lambda n: n.alterado_em) if notas else None
+        notas = [(i, n) for i, n in enumerate(self.anotacoes(container_id))
+                 if n.tipo == "onde_parei"]
+        # empate no mesmo segundo: vale a gravada por último (ordem do arquivo)
+        return max(notas, key=lambda par: (par[1].alterado_em, par[0]))[1] if notas else None
 
     def ideias(self, limite: int = 50) -> list[dict]:
         insights = sorted((n for n in self.todas_anotacoes() if n.tipo == "insight"),

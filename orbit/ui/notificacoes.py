@@ -41,7 +41,9 @@ def _registrar_aumid(icone: Path | None) -> bool:
 class ToastNotificador:
     def __init__(self, registrar_aumid: bool = True, icone: Path | None = None,
                  registrar: Callable[[BaseException], None] | None = None):
-        self._usar_aumid = registrar_aumid and _registrar_aumid(icone)
+        self._quer_aumid = registrar_aumid
+        self._icone = icone
+        self._usar_aumid = False  # registrado só no primeiro toast (nunca nos testes)
         self._registrar = registrar
         self._toaster = None
 
@@ -68,6 +70,7 @@ class ToastNotificador:
             return
         try:
             if self._toaster is None:
+                self._usar_aumid = self._quer_aumid and _registrar_aumid(self._icone)
                 self._toaster = InteractableWindowsToaster(
                     "Orbit", AUMID if self._usar_aumid else None)
             toast = Toast(["Lembrete", lem.texto], scenario=ToastScenario.Reminder)

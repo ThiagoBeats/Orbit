@@ -33,6 +33,7 @@ from orbit.core.reconcile import find_untracked, register_untracked
 from orbit.core.repository import Repository
 from orbit.core.revisions import RevisionService
 from orbit.ui.api_backup import BackupApiMixin
+from orbit.ui.api_meudia import MeuDiaApiMixin
 from orbit.ui.fileserver import FileServer
 
 _DIALOGO_ARQUIVO = 10  # webview.FileDialog.OPEN (pywebview 6.x)
@@ -79,7 +80,7 @@ def caminho_log_padrao() -> Path:
     return Path(os.environ["APPDATA"]) / "Orbit" / "orbit.log"
 
 
-class Api(BackupApiMixin):
+class Api(BackupApiMixin, MeuDiaApiMixin):
     def __init__(self, settings_path: Path | None = None, log_path: Path | None = None,
                  outlook=None, timeout_conexao: float = 5.0, ancoras_path: Path | None = None):
         self._timeout_conexao = timeout_conexao
@@ -90,6 +91,7 @@ class Api(BackupApiMixin):
         self._sync_dir = pasta_prefs / "sync"  # retratos da sincronização (fora da pasta base)
         self._log: ActionLog | None = None
         self._iniciar_estado_backup()
+        self._iniciar_estado_meudia()
         self._outlook = outlook if outlook is not None else OutlookClient()
         self._settings_path = settings_path
         self._log_path = log_path
@@ -120,6 +122,7 @@ class Api(BackupApiMixin):
     def definir_janela(self, janela) -> None:
         """Chamado pelo app.py depois de criar a janela (necessário para diálogos)."""
         self._janela = janela
+        self._reiniciar_agenda()  # lembretes só avisam com a janela pronta
 
     # O pywebview pula atributos com _serializable = False ao montar a API do JS.
     definir_janela._serializable = False
@@ -166,6 +169,7 @@ class Api(BackupApiMixin):
         self._base, self._config, self._fileserver = base, config, fileserver
         self._repo, self._log = repo, log
         self._backup = self._criar_backup_service(base, ident, log, repo)
+        self._criar_meudia(repo, ident, log)
         if antigo is not None:
             antigo.stop()
         self._erro_base = None
@@ -627,6 +631,10 @@ class Api(BackupApiMixin):
         try:
             self._sair_de_todos()
         except Exception as e:  # nunca impede o fechamento
+            self._registrar_erro(e)
+        try:
+            self._parar_agenda()
+        except Exception as e:
             self._registrar_erro(e)
         try:
             self._job_cancelar.set()
