@@ -333,3 +333,68 @@ def test_revisao_divergente_mantem_os_arquivos_de_cada_lado_no_json(amb):
     jb = read_json(amb.backup / "Clientes/Cliente X/001 - Envasadora/projeto.json")
     arqs = jb["documentos"]["diagrama_eletrico"]["revisoes"][0]["arquivos"]
     assert len(arqs) == 2
+
+
+def test_gravacao_de_colega_durante_a_copia_nao_se_perde(amb, monkeypatch):
+    from datetime import timedelta
+    r, cli, p = _projeto(amb)
+    amb.engine().sincronizar()
+    amb.subir(r, p.id)  # a sincronização vai copiar este PDF para o servidor
+    colega = Repository(amb.backup, PC2, load_shared_config(amb.backup),
+                        agora=lambda: datetime.now() + timedelta(seconds=120))
+    original = motor.copiar_seguro
+    feito = []
+
+    def copia_lenta(origem, destino):
+        if not feito and str(destino).endswith(".pdf"):
+            feito.append(1)
+            colega.update_dados(p.id, pedido="PEDIDO-DO-COLEGA")
+        return original(origem, destino)
+    monkeypatch.setattr(motor, "copiar_seguro", copia_lenta)
+    res = amb.engine().sincronizar()
+    assert feito and res.erro is None
+    for lado in (amb.base, amb.backup):
+        j = read_json(lado / "Clientes/Cliente X/001 - Envasadora/projeto.json")
+        assert j["pedido"] == "PEDIDO-DO-COLEGA"
+
+
+def test_copia_de_revisao_trava_o_documento_no_servidor(amb, monkeypatch):
+    r, cli, p = _projeto(amb)
+    amb.engine().sincronizar()
+    amb.subir(r, p.id)
+    pasta_b = amb.backup / "Clientes" / "Cliente X" / "001 - Envasadora"
+    vistos = []
+    original = motor.copiar_seguro
+
+    def olhando(origem, destino):
+        if str(destino).endswith(".pdf"):
+            vistos.append((pasta_b / ".orbit" / "travas" / "diagrama_eletrico.lock").exists())
+        return original(origem, destino)
+    monkeypatch.setattr(motor, "copiar_seguro", olhando)
+    amb.engine().sincronizar()
+    assert vistos == [True]
+    assert not (pasta_b / ".orbit" / "travas" / "diagrama_eletrico.lock").exists()
+
+
+def test_mudanca_de_um_lado_apos_primeira_copia_nao_diverge(amb):
+    r, cli, p = _projeto(amb)
+    amb.engine().sincronizar()  # o projeto é copiado inteiro para o backup
+    amb.repo("backup", PC2).update_dados(p.id, pedido="SÓ NO SERVIDOR")
+    res = amb.engine().sincronizar()
+    assert res.divergencias == []
+    assert read_json(amb.base / "Clientes/Cliente X/001 - Envasadora/projeto.json")["pedido"] \
+        == "SÓ NO SERVIDOR"
+
+
+def test_revisao_arquivada_de_um_lado_e_apagada_do_outro_e_restaurada(amb):
+    r, cli, p = _projeto(amb)
+    amb.subir(r, p.id)                       # Rev00 local
+    amb.engine().sincronizar()
+    amb.subir(amb.repo("backup", PC2), p.id)  # Rev01 no servidor: Rev00 vai para Antigos lá
+    for f in amb.backup.rglob("*Rev00.pdf"):
+        f.unlink()                            # e alguém apaga a Rev00 pelo Explorer
+    res = amb.engine().sincronizar()
+    assert res.pulados == [] and res.erro is None
+    for lado in (amb.base, amb.backup):
+        nomes = {f.parent.name + "/" + f.name[-9:] for f in lado.rglob("*.pdf")}
+        assert nomes == {"Antigos/Rev00.pdf", "Diagrama Elétrico/Rev01.pdf"}

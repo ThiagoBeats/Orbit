@@ -448,6 +448,8 @@ class _Execucao:
                     self._copiar(origem.caminho(f"{rel}/{ARQ_CLIENTE}"), alvo,
                                  para_backup=bool(rl), rel_l=f"{rel}/{ARQ_CLIENTE}",
                                  restaurado=False)
+                    if self.aplicar:
+                        self.jsons_novos[f"cliente:{cid}"] = read_json(alvo)
             except (ArquivoEmUso, PermissionError, OrbitError) as e:
                 self._checar_backup(e)
                 self.clientes_bloqueados.add(cid)
@@ -554,10 +556,19 @@ class _Execucao:
                     continue
                 raise OrbitError(f"já existe \"{alvo.name}\" diferente do outro lado")
             self._copiar(origem.caminho(r), alvo, para_backup, r, restaurado=False)
-        if not self.aplicar:
+        if self.aplicar:
+            self.jsons_novos[f"container:{cid}"] = dados  # base para a próxima junção
+        else:
             self.comp.containers.append(cid)
 
     def _sync_container(self, cid, rl, rb):
+        """Duas fases, para nunca segurar a trava do projeto durante cópias longas.
+
+        1. Sem a trava do projeto: junta, planeja e copia os arquivos que faltam,
+           segurando só a trava de upload dos documentos que recebem arquivos.
+        2. Com a trava do projeto nos dois lados: relê os JSONs (alguém pode ter
+           gravado no meio-tempo), junta de novo, leva para Antigos e grava.
+        """
         rel_l, nome_json = rl
         rel_b, _ = rb
         if rel_l != rel_b:
@@ -569,23 +580,29 @@ class _Execucao:
             if quem:
                 raise OrbitError(f"{quem} está enviando uma revisão agora; "
                                  "fica para a próxima sincronização")
+        arq_l = self.L.caminho(f"{rel_l}/{nome_json}")
+        arq_b = self.B.caminho(f"{rel_b}/{nome_json}")
+
+        # fase 1: cópias, sem a trava do projeto
+        junto, divs, ops = self._juntar_container(cid, read_json(arq_l), read_json(arq_b),
+                                                  rel_l, rel_b, nome_json)
+        copias = [op for op in ops if op[0] == "copiar"]
+        if copias:
+            with self._travas_upload(copias, rel_l, rel_b):
+                for op in copias:
+                    self._checar_cancelado()
+                    self._executar_copia(op)
+
+        # fase 2: com a trava do projeto, relê e grava
         with ExitStack() as pilha:
             if self.aplicar:
                 pilha.enter_context(self.repo_l.trava_container(cid))
                 pilha.enter_context(self.repo_b.trava_container(cid))
-            arq_l = self.L.caminho(f"{rel_l}/{nome_json}")
-            arq_b = self.B.caminho(f"{rel_b}/{nome_json}")
             jl, jb = read_json(arq_l), read_json(arq_b)
-            base = self.eng.retrato.json_base(f"container:{cid}")
-            junto, divs = mesclar_container(base, jl, jb)
-            divs += self._revisoes_com_conteudo_diferente(cid, junto, jl, jb, rel_l, rel_b, divs)
-            for d in divs:
-                d.caminho = f"{rel_l}/{nome_json}"
-            divergentes = {tuple(d.chave.split(".")[1:4:2]) for d in divs if d.tipo == "revisao"}
-            ops = self._planejar_arquivos(junto, jl, jb, rel_l, rel_b, divergentes)
+            junto, divs, ops = self._juntar_container(cid, jl, jb, rel_l, rel_b, nome_json)
             feitos: list[tuple[Path, Path]] = []
             try:
-                for op in ops:
+                for op in ops:  # normalmente só idas para Antigos (as cópias já foram feitas)
                     self._checar_cancelado()
                     if op[0] == "mover":
                         _, origem, destino = op
@@ -593,8 +610,7 @@ class _Execucao:
                             mover_seguro(origem, destino)
                             feitos.append((origem, destino))
                     else:
-                        _, origem, destino, para_backup, rel_ref, restaurado = op
-                        self._copiar(origem, destino, para_backup, rel_ref, restaurado)
+                        self._executar_copia(op)
                 para_b = _com_valores_do_backup(junto, divs, jb)
                 para_b["pasta"] = jb.get("pasta", para_b.get("pasta"))
                 for tipo, d in (jb.get("documentos") or {}).items():
@@ -621,6 +637,48 @@ class _Execucao:
             self.jsons_manter.add(f"container:{cid}")
         else:
             self.jsons_novos[f"container:{cid}"] = junto
+
+    def _juntar_container(self, cid, jl, jb, rel_l, rel_b, nome_json):
+        base = self.eng.retrato.json_base(f"container:{cid}")
+        junto, divs = mesclar_container(base, jl, jb)
+        divs += self._revisoes_com_conteudo_diferente(cid, junto, jl, jb, rel_l, rel_b, divs)
+        for d in divs:
+            d.caminho = f"{rel_l}/{nome_json}"
+        divergentes = {tuple(d.chave.split(".")[1:4:2]) for d in divs if d.tipo == "revisao"}
+        return junto, divs, self._planejar_arquivos(junto, jl, jb, rel_l, rel_b, divergentes)
+
+    @contextmanager
+    def _travas_upload(self, copias, rel_l, rel_b):
+        """Trava de upload dos documentos que vão receber arquivos (no lado de destino)."""
+        if not self.aplicar:
+            yield
+            return
+        svc = PresenceService(self.eng.identity, agora=datetime.now,
+                              registrar=self.eng.registrar)
+        por_lado = {True: set(), False: set()}
+        for op in copias:
+            por_lado[op[4]].add(op[7])
+        travas = []
+        try:
+            for para_backup, tipos in por_lado.items():
+                if tipos:
+                    pasta = self.B.caminho(rel_b) if para_backup else self.L.caminho(rel_l)
+                    travas += svc.travar_varios(pasta, tipos)
+            yield
+        except LockHeld as e:
+            raise OrbitError(f"{e} Fica para a próxima sincronização.") from None
+        finally:
+            svc.liberar_varios(travas)
+
+    def _executar_copia(self, op):
+        _, outro_lado, candidatos, destino, para_backup, rel_ref, restaurado, _tipo = op
+        origem = next((outro_lado.caminho(c) for c in candidatos
+                       if outro_lado.caminho(c).is_file()), None)
+        if origem is None:
+            raise OrbitError(f"o arquivo \"{destino.name}\" não foi encontrado do outro lado")
+        if destino.is_file():
+            return  # já copiado (ex.: na fase 1)
+        self._copiar(origem, destino, para_backup, rel_ref, restaurado)
 
     def _revisoes_com_conteudo_diferente(self, cid, junto, jl, jb, rel_l, rel_b, divs
                                          ) -> list[Divergencia]:
@@ -679,11 +737,12 @@ class _Execucao:
                     if (tipo, str(rev["numero"])) in divergentes:
                         continue
                     i = 1 if rev.get("arquivada") else 0
-                    onde_l = next((c for c in ([cl[i]] + cl) if c in self.L.arquivos), None)
-                    onde_b = next((c for c in ([cb[i]] + cb) if c in self.B.arquivos), None)
-                    for lado, onde, alvo, outro_lado, outro, para_backup in (
-                            (self.L, onde_l, cl[i], self.B, onde_b, False),
-                            (self.B, onde_b, cb[i], self.L, onde_l, True)):
+                    # consulta o disco (não a varredura): entre as fases os arquivos mudam
+                    onde_l = next((c for c in ([cl[i]] + cl) if self.L.caminho(c).is_file()), None)
+                    onde_b = next((c for c in ([cb[i]] + cb) if self.B.caminho(c).is_file()), None)
+                    for lado, onde, alvo, outro_lado, outro, cands, para_backup in (
+                            (self.L, onde_l, cl[i], self.B, onde_b, cb, False),
+                            (self.B, onde_b, cb[i], self.L, onde_l, cl, True)):
                         if onde == alvo:
                             continue
                         if onde is not None and onde.endswith(f"/Antigos/{nome}"):
@@ -693,8 +752,10 @@ class _Execucao:
                         elif outro is not None:
                             # estava nos dois lados na última sincronização: alguém apagou
                             restaurado = any(c in self.ret_arq for c in cl)
-                            ops.append(("copiar", outro_lado.caminho(outro), lado.caminho(alvo),
-                                        para_backup, cl[i], restaurado))
+                            # a origem é resolvida na hora da cópia: ela pode ter ido
+                            # para Antigos nesse meio-tempo
+                            ops.append(("copiar", outro_lado, cands, lado.caminho(alvo),
+                                        para_backup, cl[i], restaurado, tipo))
         # idas para Antigos antes das cópias (libera o nome na pasta do tipo)
         return [o for o in ops if o[0] == "mover"] + [o for o in ops if o[0] == "copiar"]
 
@@ -711,6 +772,8 @@ class _Execucao:
                 para_backup = arq_l.exists()
                 self._copiar(arq_l if para_backup else arq_b, arq_b if para_backup else arq_l,
                              para_backup, CONFIG_REL, restaurado=False)
+                if self.aplicar:
+                    self.jsons_novos["config"] = read_json(arq_l)
         except (OrbitError, OSError) as e:
             self._checar_backup(e)
             self._pular("Configurações", str(e))
