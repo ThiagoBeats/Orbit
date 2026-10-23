@@ -226,7 +226,7 @@ def mesclar_config(base: dict | None, local: dict, backup: dict
     return out, divs
 
 
-def _definir(d: dict, chave: str, valor) -> None:
+def definir_campo(d: dict, chave: str, valor) -> None:
     partes = chave.split(".")
     alvo = d
     i = 0
@@ -250,5 +250,5 @@ def aplicar_escolha(juntado: dict, div: Divergencia, escolha: str, backup: dict)
     """Aplica a escolha de uma divergência de campo ("local" mantém o valor já no juntado)."""
     out = copy.deepcopy(juntado)
     if div.tipo == "campo" and escolha == "backup":
-        _definir(out, div.chave, div.backup.get("valor"))
+        definir_campo(out, div.chave, div.backup.get("valor"))
     return out

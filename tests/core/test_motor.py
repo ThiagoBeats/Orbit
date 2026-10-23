@@ -264,3 +264,18 @@ def test_log_unido_nos_dois_lados(amb):
     eng.sincronizar()
     linhas_b = ActionLog(amb.backup, PC2, amb.tmp / "anc2.json").ler()
     assert "teste" in [l.acao for l in linhas_b]
+
+
+def test_mesma_rev_com_mesmo_nome_e_conteudo_diferente_diverge(amb):
+    r, cli, p = _projeto(amb)
+    amb.engine().sincronizar()
+    amb.subir(r, p.id)                         # Rev00 em casa
+    amb.subir(amb.repo("backup", PC2), p.id)   # outra Rev00 no servidor, mesmo nome
+    res = amb.engine().sincronizar()
+    revs = [d for d in res.divergencias if d.tipo == "revisao"]
+    assert len(revs) == 1 and revs[0].acoes == ["local", "backup", "ambos"]
+    assert revs[0].chave == "documentos.diagrama_eletrico.revisoes.0"
+    # nenhum lado foi alterado
+    a = {f.read_bytes() for f in amb.base.rglob("*.pdf")}
+    b = {f.read_bytes() for f in amb.backup.rglob("*.pdf")}
+    assert a != b and len(a) == len(b) == 1

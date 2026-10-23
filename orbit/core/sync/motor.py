@@ -18,11 +18,11 @@ import copy
 import json
 import os
 import shutil
-from contextlib import ExitStack, nullcontext
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 from uuid import uuid4
 
 from orbit.core.actionlog import ActionLog, LinhaLog, _ler_arquivo, mesclar_logs, verificar_linhas
@@ -207,15 +207,27 @@ class SyncEngine:
                     somente_container: str | None = None) -> ResultadoSync:
         if not self.backup.is_dir():
             return ResultadoSync(erro=f"Backup inacessível: {self.backup}")
-        svc = PresenceService(self.identity, agora=datetime.now, registrar=self.registrar)
-        trava = self._travar_sync(svc)
-        try:
+        with self.trava_sincronizacao():
             exe = _Execucao(self, aplicar=True, cancelar=cancelar, progresso=progresso,
                             somente=somente_container)
             exe.rodar()
             return exe.res
+
+    @contextmanager
+    def trava_sincronizacao(self) -> Iterator[None]:
+        """Uma sincronização (ou resolução) por backup de cada vez."""
+        svc = PresenceService(self.identity, agora=datetime.now, registrar=self.registrar)
+        trava = self._travar_sync(svc)
+        try:
+            yield
         finally:
             svc.liberar_varios([trava])
+
+    def juntar_logs(self) -> None:
+        """Só a junção do log de ações (chamar com a trava de sincronização)."""
+        exe = _Execucao(self, aplicar=True, cancelar=lambda: False,
+                        progresso=lambda f, a, t: None, somente=None)
+        exe._log()
 
     def _travar_sync(self, svc: PresenceService):
         lock = svc.caminho_trava(self.backup, TRAVA_SYNC)
@@ -336,8 +348,7 @@ class _Execucao:
                     "recebidos": self.res.recebidos, "restaurados": self.res.restaurados,
                     "divergencias": len(self.res.divergencias),
                     "pulados": len(self.res.pulados)})
-            if self.somente is None:
-                self._log()
+            self._log()  # sempre: toda ação local vira linha no log
             if self.aplicar:
                 self._salvar_retrato()
         except _Cancelado:
@@ -483,8 +494,6 @@ class _Execucao:
         except OrbitDataError as e:
             raise OrbitError(str(e))
         cli = dados.get("cliente_id")
-        if cli and cli in self.clientes_bloqueados:
-            raise OrbitError("o cliente deste projeto está em divergência; resolva-a primeiro")
         if alvo_json.exists():
             outro = destino._id(alvo_json)
             self.res.divergencias.append(Divergencia(
@@ -494,6 +503,8 @@ class _Execucao:
                 ["ambos", "juntar"]))
             self.bloqueados_l.append(rel)
             return
+        if cli and cli in self.clientes_bloqueados:
+            raise OrbitError("o cliente deste projeto está em divergência; resolva-a primeiro")
         arquivos = sorted((r for r in origem.arquivos if r.startswith(rel + "/")),
                           key=lambda r: (eh_json_orbit(r), r))  # JSON por último
         for r in arquivos:
@@ -530,6 +541,7 @@ class _Execucao:
             jl, jb = read_json(arq_l), read_json(arq_b)
             base = self.eng.retrato.json_base(f"container:{cid}")
             junto, divs = mesclar_container(base, jl, jb)
+            divs += self._revisoes_com_conteudo_diferente(cid, junto, jl, jb, rel_l, rel_b, divs)
             for d in divs:
                 d.caminho = f"{rel_l}/{nome_json}"
             divergentes = {tuple(d.chave.split(".")[1:4:2]) for d in divs if d.tipo == "revisao"}
@@ -572,6 +584,47 @@ class _Execucao:
             self.jsons_manter.add(f"container:{cid}")
         else:
             self.jsons_novos[f"container:{cid}"] = junto
+
+    def _revisoes_com_conteudo_diferente(self, cid, junto, jl, jb, rel_l, rel_b, divs
+                                         ) -> list[Divergencia]:
+        """Mesma revisão, mesmos nomes de arquivo, conteúdo diferente nos dois lados.
+
+        Acontece quando cada lado criou a sua RevNN no mesmo dia: o nome sai igual.
+        """
+        ja = {d.chave for d in divs if d.tipo == "revisao"}
+        novas = []
+        docs_l, docs_b = jl.get("documentos") or {}, jb.get("documentos") or {}
+        for tipo in junto["documentos"]:
+            dl, db = docs_l.get(tipo), docs_b.get(tipo)
+            if dl is None or db is None:
+                continue
+            revs_b = {r["numero"]: r for r in db.get("revisoes") or []}
+            for rl_ in dl.get("revisoes") or []:
+                n = rl_["numero"]
+                chave = f"documentos.{tipo}.revisoes.{n}"
+                rb_ = revs_b.get(n)
+                if rb_ is None or chave in ja:
+                    continue
+                diferente = False
+                for a in rl_.get("arquivos") or []:
+                    hl = next((self.L.arquivos[c].hash for c in (
+                        f"{rel_l}/{dl['pasta']}/{a['nome']}",
+                        f"{rel_l}/{dl['pasta']}/Antigos/{a['nome']}") if c in self.L.arquivos), None)
+                    hb = next((self.B.arquivos[c].hash for c in (
+                        f"{rel_b}/{db['pasta']}/{a['nome']}",
+                        f"{rel_b}/{db['pasta']}/Antigos/{a['nome']}") if c in self.B.arquivos), None)
+                    if hl is not None and hb is not None and hl != hb:
+                        diferente = True
+                if diferente:
+                    novas.append(Divergencia(
+                        uuid4().hex, "revisao", cid, "", chave,
+                        f"Rev{n:02d} do documento {tipo} tem conteúdo diferente nos dois lados.",
+                        {"revisao": copy.deepcopy(rl_), "usuario": rl_.get("usuario"),
+                         "computador": rl_.get("computador"), "data_hora": rl_.get("data")},
+                        {"revisao": copy.deepcopy(rb_), "usuario": rb_.get("usuario"),
+                         "computador": rb_.get("computador"), "data_hora": rb_.get("data")},
+                        ["local", "backup", "ambos"]))
+        return novas
 
     def _planejar_arquivos(self, junto, jl, jb, rel_l, rel_b, divergentes) -> list:
         ops = []
