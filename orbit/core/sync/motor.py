@@ -31,7 +31,7 @@ from orbit.core.config import SharedConfig
 from orbit.core.errors import ArquivoEmUso, LockHeld, OrbitDataError, OrbitError
 from orbit.core.identity import Identity
 from orbit.core.jsonstore import read_json, write_json_atomic
-from orbit.core.meudia import mesclar_por_id
+from orbit.core.meudia import _travar_com_espera, mesclar_por_id
 from orbit.core.presence import MAX_IDADE_TRAVA_S, PresenceService
 from orbit.core.repository import (ARQ_CLIENTE, ARQ_MAQUINA, ARQ_PROJETO, PASTA_CLIENTES,
                                    PASTA_MAQUINAS, Repository)
@@ -888,6 +888,12 @@ class _Execucao:
             if self.aplicar and cid is not None:  # anotacoes.json: mesma trava do projeto
                 pilha.enter_context(self.repo_l.trava_container(cid))
                 pilha.enter_context(self.repo_b.trava_container(cid))
+            elif self.aplicar and rel_l.casefold().endswith("/meu_dia.json"):
+                # meu_dia.json: a mesma trava pessoal usada pelo Orbit ao gravar
+                svc = PresenceService(self.eng.identity, agora=datetime.now)
+                for arq in (arq_l, arq_b):
+                    trava = _travar_com_espera(svc, arq.parent, "_meu_dia")
+                    pilha.callback(svc.liberar_varios, [trava])
             try:
                 jl, jb = read_json(arq_l), read_json(arq_b)
             except OrbitDataError:
