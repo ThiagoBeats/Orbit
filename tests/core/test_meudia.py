@@ -148,3 +148,88 @@ def test_anotacao_de_colega_e_visivel_e_atividade_nao(amb):
     outro.adicionar("Definir IHM", "definicao", p.id)
     assert [i.texto for i in svc.anotacoes(p.id)] == ["Definir IHM"]
     assert svc.itens_pessoais() == []
+
+
+# ---------- Tarefa 2: consultas do dashboard ----------
+
+def _ids(itens):
+    return [i.texto for i in itens]
+
+
+def test_lista_inclui_atividades_do_dia_e_pendencias(amb):
+    svc, repo, p, log, relogio, base = amb
+    hoje = relogio.t.date()
+    svc.adicionar("Atividade de hoje", "atividade")
+    svc.adicionar("Atividade de amanhã", "atividade", dia=hoje + timedelta(days=1))
+    svc.adicionar("Pesquisar X", "pesquisar", p.id)
+    svc.adicionar("Um insight", "insight", p.id)
+    assert _ids(svc.lista_do_dia(hoje)) == ["Atividade de hoje", "Pesquisar X"]
+    assert _ids(svc.lista_do_dia(hoje + timedelta(days=1))) == ["Atividade de amanhã",
+                                                                "Pesquisar X"]
+    assert svc.abertas_hoje() == 2
+
+
+def test_atividade_nao_feita_passa_para_hoje(amb):
+    svc, repo, p, log, relogio, base = amb
+    relogio.t = datetime(2026, 10, 23, 23, 59, 0)
+    svc.adicionar("Terminar memorial", "atividade")
+    relogio.t = datetime(2026, 10, 24, 0, 1, 0)
+    lista = svc.lista_do_dia(date(2026, 10, 24))
+    assert _ids(lista) == ["Terminar memorial"]
+    assert _ids(svc.lista_do_dia(date(2026, 10, 23))) == ["Terminar memorial"]
+
+
+def test_feito_aparece_riscado_no_dia_do_ok(amb):
+    svc, repo, p, log, relogio, base = amb
+    relogio.t = datetime(2026, 10, 22, 10, 0, 0)
+    a = svc.adicionar("Antiga", "atividade")
+    b = svc.adicionar("Outra", "atividade")
+    relogio.t = datetime(2026, 10, 23, 10, 0, 0)
+    svc.marcar_feito(a.id, True)
+    hoje = svc.lista_do_dia(date(2026, 10, 23))
+    assert _ids(hoje) == ["Outra", "Antiga"]  # não feitos primeiro
+    assert hoje[1].feito_em is not None
+    assert svc.abertas_hoje() == 1
+
+
+def test_pendencias_de_colegas_nao_entram(amb):
+    svc, repo, p, log, relogio, base = amb
+    _colega(amb).adicionar("Pesquisa da Ana", "pesquisar", p.id)
+    assert svc.lista_do_dia(relogio.t.date()) == []
+
+
+def test_onde_parei_usa_o_meu_e_o_banner_usa_qualquer_um(amb):
+    svc, repo, p, log, relogio, base = amb
+    svc.adicionar("Parei no M3", "onde_parei", p.id)
+    _colega(amb).adicionar("Ana parou no painel", "onde_parei", p.id)
+    meu = svc.onde_parei()
+    assert [(x["container_id"], x["item"].texto) for x in meu] == [(p.id, "Parei no M3")]
+    assert meu[0]["container_nome"] == "Envasadora" and meu[0]["cliente_nome"] == "Cliente X"
+    assert svc.ultimo_onde_parei(p.id).texto == "Ana parou no painel"
+
+
+def test_ideias_de_todos_os_projetos(amb):
+    svc, repo, p, log, relogio, base = amb
+    m = repo.create_maquina("EC", "Esteira")
+    svc.adicionar("Bloco de alarmes", "insight", p.id)
+    _colega(amb).adicionar("Régua por cor", "insight", m.id)
+    ideias = svc.ideias()
+    assert [(x["item"].texto, x["container_nome"]) for x in ideias] == [
+        ("Régua por cor", "Esteira"), ("Bloco de alarmes", "Envasadora")]
+
+
+def test_docs_pendentes_conta_so_ativos_e_aplicaveis(amb, tmp_path):
+    svc, repo, p, log, relogio, base = amb
+    from orbit.core.revisions import RevisionService
+    total_tipos = len(repo.load_container(p.id).documentos)
+    assert svc.docs_pendentes() == total_tipos
+    pdf = tmp_path / "a.pdf"
+    pdf.write_bytes(b"x")
+    rs = RevisionService(repo)
+    rs.enviar_revisao(p.id, "diagrama_eletrico", pdf, [], "Em elaboração", "")
+    rs.definir_nao_se_aplica(p.id, "consumo_pneumatico", True)
+    assert svc.docs_pendentes() == total_tipos - 2
+    cli = repo.create_cliente("Outro")
+    p2 = repo.create_projeto(cli.id, "9", "Concluído")
+    repo.update_dados(p2.id, situacao="concluido")
+    assert svc.docs_pendentes() == total_tipos - 2

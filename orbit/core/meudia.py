@@ -286,3 +286,81 @@ class MeuDiaService:
             except OrbitError:
                 continue  # projeto com anotações ilegíveis: não derruba o dashboard
         return out
+
+    # ---------- consultas do dashboard ----------
+    def _meus(self) -> list[Item]:
+        eu = self.identity.usuario
+        return self.itens_pessoais() + [n for n in self.todas_anotacoes() if n.usuario == eu]
+
+    def lista_do_dia(self, dia: date) -> list[Item]:
+        """Itens com OK do próprio usuário que aparecem no dia (spec Meu dia §3)."""
+        hoje = self.agora().date()
+        d_iso = dia.isoformat()
+        escolhidos: dict[str, Item] = {}
+        for it in self._meus():
+            if it.tipo not in TIPOS_COM_OK:
+                continue
+            feito_dia = it.feito_em[:10] if it.feito_em else None
+            entra = it.tipo == "atividade" and it.dia == d_iso
+            if feito_dia is None:
+                if it.tipo == "atividade" and dia == hoje and it.dia < d_iso:
+                    entra = True  # não terminada: passa para hoje
+                if it.tipo in ("pesquisar", "definicao") and dia >= hoje:
+                    entra = True  # pendência fica até receber OK
+            elif feito_dia == d_iso:
+                entra = True  # riscado no dia do OK
+            if entra:
+                escolhidos[it.id] = it
+        return sorted(escolhidos.values(), key=lambda i: (i.feito_em is not None, i.criado_em))
+
+    def abertas_hoje(self) -> int:
+        return sum(1 for i in self.lista_do_dia(self.agora().date()) if i.feito_em is None)
+
+    def _nomes(self, container_id: str) -> tuple[str, str | None]:
+        c = self.repo.load_container(container_id)
+        cli = self.repo.cliente_de(c)
+        return c.nome, cli.nome if cli else None
+
+    def onde_parei(self) -> list[dict]:
+        """A anotação "onde parei" mais recente DO PRÓPRIO usuário em cada projeto."""
+        eu = self.identity.usuario
+        ultimo: dict[str, Item] = {}
+        for n in self.todas_anotacoes():
+            if n.tipo == "onde_parei" and n.usuario == eu:
+                atual = ultimo.get(n.container_id)
+                if atual is None or n.alterado_em > atual.alterado_em:
+                    ultimo[n.container_id] = n
+        out = []
+        for cid, it in ultimo.items():
+            nome, cliente = self._nomes(cid)
+            out.append({"container_id": cid, "container_nome": nome, "cliente_nome": cliente,
+                        "item": it})
+        return sorted(out, key=lambda x: x["item"].alterado_em, reverse=True)
+
+    def ultimo_onde_parei(self, container_id: str) -> Item | None:
+        """A mais recente de qualquer pessoa (faixa no topo do painel do projeto)."""
+        notas = [n for n in self.anotacoes(container_id) if n.tipo == "onde_parei"]
+        return max(notas, key=lambda n: n.alterado_em) if notas else None
+
+    def ideias(self, limite: int = 50) -> list[dict]:
+        insights = sorted((n for n in self.todas_anotacoes() if n.tipo == "insight"),
+                          key=lambda n: n.criado_em, reverse=True)[:limite]
+        out = []
+        for it in insights:
+            nome, cliente = self._nomes(it.container_id)
+            out.append({"container_id": it.container_id, "container_nome": nome,
+                        "cliente_nome": cliente, "item": it})
+        return out
+
+    def docs_pendentes(self) -> int:
+        total = 0
+        for cid in self._todos_containers():
+            try:
+                c = self.repo.load_container(cid)
+            except OrbitError:
+                continue
+            if c.situacao != "ativo":
+                continue
+            total += sum(1 for d in c.documentos.values()
+                         if not d.nao_se_aplica and d.atual is None)
+        return total
