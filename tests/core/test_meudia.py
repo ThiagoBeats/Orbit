@@ -233,3 +233,60 @@ def test_docs_pendentes_conta_so_ativos_e_aplicaveis(amb, tmp_path):
     p2 = repo.create_projeto(cli.id, "9", "Concluído")
     repo.update_dados(p2.id, situacao="concluido")
     assert svc.docs_pendentes() == total_tipos - 2
+
+
+# ---------- revisão final ----------
+
+def test_ok_e_edicao_depois_de_mudar_de_arquivo(amb):
+    svc, repo, p, *_ = amb
+    a = svc.adicionar("Era atividade", "atividade", p.id)
+    svc.editar(a.id, tipo="pesquisar")          # atividade pessoal → anotação do projeto
+    svc.marcar_feito(a.id, True)
+    assert svc.anotacoes(p.id)[0].feito_em is not None
+    b = svc.adicionar("Nota solta", "pesquisar")
+    svc.editar(b.id, container_id=p.id)
+    svc.editar(b.id, texto="novo")
+    assert [n.texto for n in svc.anotacoes(p.id) if n.id == b.id] == ["novo"]
+    svc.excluir(b.id)
+    assert [n.id for n in svc.anotacoes(p.id)] == [a.id]
+
+
+def test_nao_move_anotacao_de_colega_para_o_meu_arquivo(amb):
+    svc, repo, p, *_ = amb
+    nota = _colega(amb).adicionar("Da Ana", "pesquisar", p.id)
+    with pytest.raises(OrbitError):
+        svc.editar(nota.id, tipo="definicao", container_id=None)
+    assert [n.texto for n in svc.anotacoes(p.id)] == ["Da Ana"]
+    svc.editar(nota.id, tipo="definicao")       # mudar o tipo no mesmo projeto pode
+    assert svc.anotacoes(p.id)[0].tipo == "definicao"
+
+
+def test_lembrete_semanal_comeca_no_primeiro_dia_escolhido(amb):
+    svc, *_ = amb
+    l = svc.salvar_lembrete({"texto": "x", "quando": "2026-10-22T10:00",   # quinta
+                             "recorrencia": {"tipo": "semanal", "dias": [2, 4]}})
+    assert l.quando == "2026-10-23T10:00"                                   # sexta
+    u = svc.salvar_lembrete({"texto": "y", "quando": "2026-10-24T08:00",   # sábado
+                             "recorrencia": {"tipo": "dias_uteis"}})
+    assert u.quando == "2026-10-26T08:00"
+
+
+def test_editar_mensal_do_dia_31_mantem_o_dia(amb):
+    from datetime import datetime as D
+    from orbit.core.lembretes import marcar_disparado
+    svc, *_ = amb
+    l = svc.salvar_lembrete({"texto": "x", "quando": "2026-01-31T10:00",
+                             "recorrencia": {"tipo": "mensal"}})
+    svc.aplicar(l.id, lambda x: marcar_disparado(x, D(2026, 1, 31, 10, 0, 5)))
+    atual = svc.lembretes()[0]
+    assert atual.quando == "2026-02-28T10:00"
+    svc.salvar_lembrete({"id": l.id, "texto": "só o texto", "quando": atual.quando,
+                         "recorrencia": {"tipo": "mensal"}})
+    svc.aplicar(l.id, lambda x: marcar_disparado(x, D(2026, 2, 28, 10, 0, 5)))
+    assert svc.lembretes()[0].quando == "2026-03-31T10:00"
+
+
+def test_item_malformado_nao_derruba_a_juncao():
+    junto = mesclar_por_id([{"id": "1", "alterado_em": "a"}, "lixo", {"sem_id": 1}],
+                           [{"id": "2", "alterado_em": "b"}, None])
+    assert sorted(d["id"] for d in junto) == ["1", "2"]

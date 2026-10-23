@@ -65,9 +65,10 @@ class Item:
 def mesclar_por_id(a: list[dict], b: list[dict]) -> list[dict]:
     """União por id; mesmo id dos dois lados: vence o maior alterado_em (empate: `a`)."""
     por_id: dict[str, dict] = {}
-    for d in a or []:
+    validos = lambda lista: [d for d in lista or [] if isinstance(d, dict) and d.get("id")]
+    for d in validos(a):
         por_id.setdefault(d["id"], d)
-    for d in b or []:
+    for d in validos(b):
         atual = por_id.get(d["id"])
         if atual is None or str(d.get("alterado_em", "")) > str(atual.get("alterado_em", "")):
             por_id[d["id"]] = d
@@ -196,7 +197,7 @@ class MeuDiaService:
 
     def _localizar(self, item_id: str) -> Item:
         for d in self._dados_pessoais()["itens"]:
-            if d.get("id") == item_id:
+            if d.get("id") == item_id and not d.get("excluido"):
                 return Item.from_dict(d)
         for cid in self._todos_containers():
             try:
@@ -204,7 +205,7 @@ class MeuDiaService:
             except OrbitDataError:
                 continue
             for d in notas:
-                if d.get("id") == item_id:
+                if d.get("id") == item_id and not d.get("excluido"):
                     return Item.from_dict(d)
         raise OrbitError("Anotação não encontrada.")
 
@@ -240,6 +241,10 @@ class MeuDiaService:
         if container_id != _MANTER:
             novo.container_id = self._validar_container(container_id)
         novo.alterado_em = self._agora_iso()
+        if (atual.usuario != self.identity.usuario
+                and self._destino(novo.tipo, novo.container_id) is None):
+            raise OrbitError("Esta anotação é de outra pessoa: ela continua no projeto. "
+                             "Só as suas anotações podem virar itens pessoais.")
         if self._destino(atual.tipo, atual.container_id) != self._destino(novo.tipo,
                                                                           novo.container_id):
             self._gravar(novo)  # primeiro no destino: nunca fica sem cópia viva
@@ -374,15 +379,15 @@ class MeuDiaService:
                 if not d.get("excluido")]
 
     def salvar_lembrete(self, dados: dict):
-        from orbit.core.lembretes import Lembrete, ler_data, validar_recorrencia
+        from orbit.core.lembretes import Lembrete, alinhar_inicio, ler_data, validar_recorrencia
         if not isinstance(dados, dict):
             raise OrbitError("Lembrete inválido.")
         texto = dados.get("texto")
         texto = texto.strip() if isinstance(texto, str) else ""
         if not texto:
             raise OrbitError("Escreva o texto do lembrete.")
-        quando = ler_data(dados.get("quando")).strftime("%Y-%m-%dT%H:%M")
         rec = validar_recorrencia(dados.get("recorrencia"))
+        quando = alinhar_inicio(ler_data(dados.get("quando")), rec).strftime("%Y-%m-%dT%H:%M")
         container_id = self._validar_container(dados.get("container_id"))
         agora = self._agora_iso()
         lid = dados.get("id")
@@ -392,6 +397,10 @@ class MeuDiaService:
                 raise OrbitError("Lembrete não encontrado.")
             if atual is not None:
                 lem = Lembrete.from_dict(atual)
+                dia_original = lem.recorrencia.get("dia")
+                if (rec["tipo"] == "mensal" and lem.recorrencia.get("tipo") == "mensal"
+                        and dia_original and quando == lem.quando):
+                    rec["dia"] = dia_original  # data não mudou: mantém o "dia 31"
                 lem.texto, lem.quando, lem.recorrencia = texto, quando, rec
                 lem.container_id = container_id
                 lem.adiado_ate, lem.ultimo_disparo, lem.ativo = None, None, True

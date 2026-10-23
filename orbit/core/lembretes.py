@@ -92,6 +92,19 @@ def proximo(quando: datetime, rec: dict, dia_base: int | None = None) -> datetim
     return None
 
 
+def alinhar_inicio(quando: datetime, rec: dict) -> datetime:
+    """Primeira ocorrência válida: semanal num dia escolhido, dias úteis de seg a sex."""
+    tipo = (rec or {}).get("tipo", "nenhuma")
+    t = quando
+    if tipo == "dias_uteis":
+        while t.weekday() >= 5:
+            t += timedelta(days=1)
+    elif tipo == "semanal" and rec.get("dias"):
+        while t.weekday() not in rec["dias"]:
+            t += timedelta(days=1)
+    return t
+
+
 def avancar_ate_futuro(quando: datetime, rec: dict, agora: datetime) -> datetime | None:
     t = quando
     while t is not None and t <= agora:
