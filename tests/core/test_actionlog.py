@@ -124,3 +124,33 @@ def test_linha_ilegivel_nao_quebra(log):
         f.write("lixo\n")
     assert len(log.ler()) == 1
     assert not log.verificar().integro
+
+
+def test_doze_acoes_no_mesmo_segundo_continuam_integras_apos_juntar(tmp_path):
+    fixo = lambda: datetime(2026, 10, 23, 8, 0, 0)
+    log = ActionLog(tmp_path / "base", Identity("thiago", "PC1"), tmp_path / "anc.json", agora=fixo)
+    for i in range(12):
+        log.registrar_acao("arquivo_restaurado", {"i": i})
+    juntas, conflitos = mesclar_logs(log.ler(), [])
+    assert conflitos == []
+    assert [l.n for l in juntas] == list(range(1, 13))
+    log.caminho.write_text("".join(json.dumps(l.to_dict(), ensure_ascii=False) + "\n"
+                                   for l in juntas), encoding="utf-8")
+    assert log.verificar().integro
+    nova = log.registrar_acao("x", {})
+    assert nova.n == 13 and nova.anterior == juntas[-1].codigo
+    assert log.verificar().integro
+
+
+def test_verificar_segue_a_ordem_de_n_mesmo_fora_de_ordem_no_arquivo(tmp_path):
+    fixo = lambda: datetime(2026, 10, 23, 8, 0, 0)
+    log = ActionLog(tmp_path / "base", Identity("thiago", "PC1"), tmp_path / "anc.json", agora=fixo)
+    for i in range(3):
+        log.registrar_acao("x", {"i": i})
+    linhas = log.ler()
+    embaralhadas = [linhas[2], linhas[0], linhas[1]]
+    log.caminho.write_text("".join(json.dumps(l.to_dict(), ensure_ascii=False) + "\n"
+                                   for l in embaralhadas), encoding="utf-8")
+    assert log.verificar().integro
+    assert log.registrar_acao("y", {}).n == 4
+    assert log.verificar().integro

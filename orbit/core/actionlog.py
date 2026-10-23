@@ -126,6 +126,7 @@ def verificar_linhas(linhas: list[LinhaLog], ilegiveis: list[int] | None = None,
     for l in linhas:
         por_pc.setdefault(l.computador, []).append(l)
     for pc, seq in por_pc.items():
+        seq = sorted(seq, key=lambda l: l.n)  # a corrente segue n, não a posição no arquivo
         anterior: LinhaLog | None = None
         quebrado = False  # segmento atual já tem problema: pula até o próximo reinício
         for l in seq:
@@ -176,7 +177,7 @@ def _alertados(linhas: list[LinhaLog]) -> set[tuple[str, int]]:
 
 
 def mesclar_logs(a: list[LinhaLog], b: list[LinhaLog]) -> tuple[list[LinhaLog], list[str]]:
-    """União por `seq` (ordenada por data/hora, seq) e os `seq` em conflito.
+    """União por `seq` (ordenada por data/hora, computador, n) e os `seq` em conflito.
 
     Em conflito (mesmo seq, conteúdo diferente), fica a linha de `a`.
     """
@@ -190,7 +191,7 @@ def mesclar_logs(a: list[LinhaLog], b: list[LinhaLog]) -> tuple[list[LinhaLog], 
             por_seq[l.seq] = l
         elif atual.to_dict() != l.to_dict() and l.seq not in conflitos:
             conflitos.append(l.seq)
-    juntas = sorted(por_seq.values(), key=lambda l: (l.data_hora, l.seq))
+    juntas = sorted(por_seq.values(), key=lambda l: (l.data_hora, l.computador, l.n))
     return juntas, conflitos
 
 
@@ -259,8 +260,8 @@ class ActionLog:
         try:
             linhas, _ = _ler_arquivo(self.caminho)
             minhas = [l for l in linhas if l.computador == self.identity.computador]
-            ultima = minhas[-1] if minhas else None
-            n = max((l.n for l in minhas), default=0) + 1
+            ultima = max(minhas, key=lambda l: l.n) if minhas else None
+            n = ultima.n + 1 if ultima else 1
             linha = LinhaLog(
                 seq=f"{self.identity.computador}-{n}", n=n,
                 computador=self.identity.computador, usuario=self.identity.usuario,
