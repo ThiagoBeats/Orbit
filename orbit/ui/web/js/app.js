@@ -412,7 +412,9 @@ function iniciar() {
   if (_iniciado || !(window.pywebview && window.pywebview.api)) return;
   _iniciado = true;
   carregarLogo();
-  recarregar().catch(e => { if (!(e instanceof ErroApi)) console.error(e); });
+  recarregar()
+    .catch(e => { if (!(e instanceof ErroApi)) console.error(e); })
+    .finally(() => Abertura.concluir()); // a animação só existe na abertura
 }
 
 window.addEventListener('pywebviewready', iniciar);
