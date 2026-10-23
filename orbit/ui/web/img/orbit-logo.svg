@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" role="img" aria-label="Orbit">
+  <!-- Orbit, opção C refinada: folha de documento com dobra e duas linhas, órbita tracejada e satélite.
+       Cores = tema escuro suave. Quando o SVG é embutido na página, as variáveis CSS "logo-*" (ver orbit.css)
+       substituem as cores (tema claro). -->
+  <style>
+    .folha { fill: var(--logo-folha, #e4e8ee); }
+    .dobra { fill: var(--logo-dobra, #93a0b0); }
+    .linha { stroke: var(--logo-linha, #1b2129); }
+    .orbita { stroke: var(--logo-orbita, #7fa7d9); }
+    .satelite { fill: var(--logo-orbita, #7fa7d9); }
+  </style>
+  <defs>
+    <!-- metade de baixo da órbita (no sistema já girado), desenhada na frente da folha -->
+    <clipPath id="orbit-frente">
+      <rect x="0" y="52" width="100" height="48"/>
+    </clipPath>
+  </defs>
+  <g transform="rotate(-20 50 52)">
+    <!-- órbita inteira, atrás da folha -->
+    <ellipse class="orbita" cx="50" cy="52" rx="44" ry="14" fill="none" stroke-width="4.5"
+             stroke-dasharray="20.3 7.5" stroke-linecap="round"/>
+  </g>
+  <!-- folha -->
+  <path class="folha" d="M37 22 h19 l12 12 v42 a3.5 3.5 0 0 1 -3.5 3.5 h-27.5 a3.5 3.5 0 0 1 -3.5 -3.5 v-50.5 a3.5 3.5 0 0 1 3.5 -3.5z"/>
+  <path class="dobra" d="M56 22 v8.5 a3.5 3.5 0 0 0 3.5 3.5 h8.5z"/>
+  <line class="linha" x1="41" y1="49" x2="62" y2="49" stroke-width="4" stroke-linecap="round"/>
+  <line class="linha" x1="41" y1="59" x2="56" y2="59" stroke-width="4" stroke-linecap="round"/>
+  <g transform="rotate(-20 50 52)">
+    <!-- parte da frente da órbita, passando sobre a folha -->
+    <ellipse class="orbita" cx="50" cy="52" rx="44" ry="14" fill="none" stroke-width="4.5"
+             stroke-dasharray="20.3 7.5" stroke-linecap="round" clip-path="url(#orbit-frente)"/>
+    <!-- satélite sobre a órbita, à direita -->
+    <circle class="satelite" cx="90" cy="46" r="6"/>
+  </g>
+</svg>

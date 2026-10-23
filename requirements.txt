@@ -1,0 +1,4 @@
+pywebview==6.2.1
+pywin32==312
+pytest==9.1.1
+pyinstaller==6.22.3
