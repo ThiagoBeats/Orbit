@@ -32,6 +32,7 @@ from orbit.core.presence import PresenceService
 from orbit.core.reconcile import find_untracked, register_untracked
 from orbit.core.repository import Repository
 from orbit.core.revisions import RevisionService
+from orbit.ui.api_backup import BackupApiMixin
 from orbit.ui.fileserver import FileServer
 
 _DIALOGO_ARQUIVO = 10  # webview.FileDialog.OPEN (pywebview 6.x)
@@ -77,7 +78,7 @@ def caminho_log_padrao() -> Path:
     return Path(os.environ["APPDATA"]) / "Orbit" / "orbit.log"
 
 
-class Api:
+class Api(BackupApiMixin):
     def __init__(self, settings_path: Path | None = None, log_path: Path | None = None,
                  outlook=None, timeout_conexao: float = 5.0, ancoras_path: Path | None = None):
         self._timeout_conexao = timeout_conexao
@@ -85,7 +86,9 @@ class Api:
         pasta_prefs = (Path(settings_path).parent if settings_path
                        else user_settings_path().parent)
         self._ancoras_path = Path(ancoras_path) if ancoras_path else pasta_prefs / "ancoras.json"
+        self._sync_dir = pasta_prefs / "sync"  # retratos da sincronização (fora da pasta base)
         self._log: ActionLog | None = None
+        self._iniciar_estado_backup()
         self._outlook = outlook if outlook is not None else OutlookClient()
         self._settings_path = settings_path
         self._log_path = log_path
@@ -161,9 +164,12 @@ class Api:
         self._sair_de_todos()  # presenças gravadas na base anterior
         self._base, self._config, self._fileserver = base, config, fileserver
         self._repo, self._log = repo, log
+        self._backup = self._criar_backup_service(base, ident, log, repo)
         if antigo is not None:
             antigo.stop()
         self._erro_base = None
+        threading.Thread(target=self._ao_abrir_backup, daemon=True,
+                         name="orbit-backup-abertura").start()
 
     def _exigir_base(self) -> Path:
         if self._base is None:

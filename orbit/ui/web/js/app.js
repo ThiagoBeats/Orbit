@@ -332,9 +332,11 @@ function telaBoasVindas() {
          <b>.orbit</b> com as configurações compartilhadas.</p>
       ${erro ? `<p class="aviso">${esc(erro)}</p>` : ''}
       <button type="button" class="btn solid" id="btn-pasta-base">Escolher pasta base</button>
+      <button type="button" class="btn" id="btn-recuperar">Recuperar de um backup</button>
     </div></div>`;
   embutirLogos(el);
   el.querySelector('#btn-pasta-base').addEventListener('click', escolherPastaBase);
+  el.querySelector('#btn-recuperar').addEventListener('click', () => restaurarPcNovo());
 }
 
 /* Pasta base configurada mas inacessível na abertura (rede fora, pendrive removido):
@@ -386,6 +388,7 @@ async function recarregar() {
     if (Orbit.settings.pasta_base) { await telaSemBase(true); return; }
     Orbit.conexao = null;
     _pintarIndicador(null, false);
+    _pintarBackup(null);
     telaBoasVindas();
     return;
   }
@@ -397,6 +400,7 @@ async function recarregar() {
   if (!location.hash) location.hash = '#/clientes';
   await renderizar();
   testarConexao({ falha: true }); // sem await: não atrasa a primeira tela
+  atualizarIndicadorBackup(false);
 }
 
 window.addEventListener('hashchange', renderizar);
