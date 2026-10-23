@@ -336,3 +336,4 @@ a.proj:hover { color:var(--text); }
 .linha-campos .field { flex:1; }
 .field.dias-semana label { display:flex; align-items:center; gap:4px; text-transform:none; letter-spacing:0; font-size:13px; color:var(--text); margin:0; }
 .field.dias-semana input { width:auto; }
+#pn-anexos.alvo { border-color:var(--accent); border-style:dashed; }

@@ -31,6 +31,7 @@ Tudo continua em pastas e arquivos comuns. Qualquer pessoa entende a organizaç�
   - Contador de documentos emitidos.
 - **Máquinas padrão.** Documentação geral única para máquinas de catálogo, sem vínculo com cliente.
 - **E-mail.** O Orbit monta o e-mail com os anexos pelo Outlook clássico. Sem ele, abre um rascunho `.eml` no programa de e-mail padrão. Todo envio fica registrado na tela **Envios**.
+- **Anexos sem revisão.** Manuais de componentes, notas fiscais e informativos ficam na pasta `Anexos` do projeto ou da máquina, com o nome original, sem renomear e sem controle de revisão.
 - **Importação.** Traz documentos de projetos antigos, inclusive várias revisões de uma vez, sem alterar os originais.
 - **Arquivos colocados à mão.** O Orbit detecta arquivos copiados direto na pasta e permite registrá-los.
 - **Pronto para rede.**
