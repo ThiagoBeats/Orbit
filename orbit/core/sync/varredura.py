@@ -44,7 +44,13 @@ def excluido(rel: str) -> bool:
     partes = [p.casefold() for p in rel.replace("\\", "/").split("/") if p]
     if not partes:
         return True
-    if partes[-1].startswith("~orbit-"):
+    nome = partes[-1]
+    if nome.startswith("~orbit-"):
+        return True
+    # temporários do Office/LibreOffice/Windows: sincronizá-los faria colegas verem o
+    # documento "em uso" e eles voltariam para sempre
+    if (nome.startswith("~$") or nome.startswith(".~lock.") or nome.endswith(".tmp")
+            or nome in ("thumbs.db", "desktop.ini", ".ds_store")):
         return True
     if PASTA_DIVERGENCIAS.casefold() in partes:
         return True

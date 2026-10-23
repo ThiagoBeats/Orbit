@@ -77,3 +77,12 @@ def test_id_par_estavel_e_insensivel_a_caixa(tmp_path):
     assert id_par(a, b) == id_par(tmp_path / "base", tmp_path / "BACKUP")
     assert len(id_par(a, b)) == 16
     assert id_par(a, b) != id_par(b, a)
+
+
+def test_temporarios_do_office_e_do_windows_nao_sao_sincronizados():
+    assert excluido("Clientes/C/P/Memorial/~$Memorial.docx")
+    assert excluido("Clientes/C/P/Thumbs.db")
+    assert excluido("Clientes/C/desktop.ini")
+    assert excluido("Clientes/C/P/x.TMP")
+    assert excluido("Clientes/C/P/.~lock.Planilha.xlsx#")
+    assert not excluido("Clientes/C/P/Memorial/Memorial - Rev00.docx")
