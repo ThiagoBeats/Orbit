@@ -330,13 +330,14 @@ class _Execucao:
             raise _BackupInacessivel(str(e)) from e
 
     def _para_b(self, rel_l: str) -> str:
-        for pl, pb in self.prefixos:
+        """Traduz um caminho local para o backup (pasta do projeto antes da do cliente)."""
+        for pl, pb in sorted(self.prefixos, key=lambda par: len(par[0]), reverse=True):
             if rel_l == pl or rel_l.startswith(pl + "/"):
                 return pb + rel_l[len(pl):]
         return rel_l
 
     def _para_l(self, rel_b: str) -> str:
-        for pl, pb in self.prefixos:
+        for pl, pb in sorted(self.prefixos, key=lambda par: len(par[1]), reverse=True):
             if rel_b == pb or rel_b.startswith(pb + "/"):
                 return pl + rel_b[len(pb):]
         return rel_b
@@ -527,7 +528,9 @@ class _Execucao:
         origem, destino = (self.L, self.B) if rl else (self.B, self.L)
         rel, nome_json = rl or rb
         para_backup = bool(rl)
-        alvo_json = destino.caminho(f"{rel}/{nome_json}")
+        traduzir = self._para_b if para_backup else self._para_l
+        rel_d = traduzir(rel)
+        alvo_json = destino.caminho(f"{rel_d}/{nome_json}")
         try:
             dados = read_json(origem.caminho(f"{rel}/{nome_json}"))
         except OrbitDataError as e:
@@ -548,10 +551,12 @@ class _Execucao:
                           key=lambda r: (eh_json_orbit(r), r))  # JSON por último
         for r in arquivos:
             self._checar_cancelado()
+            r_d = traduzir(r)
             (self.ref_l if para_backup else self.ref_b).add(r)
-            alvo = destino.caminho(r)
+            (self.ref_b if para_backup else self.ref_l).add(r_d)
+            alvo = destino.caminho(r_d)
             if alvo.exists():
-                info = destino.arquivos.get(r)
+                info = destino.arquivos.get(r_d)
                 if info is not None and info.hash == origem.arquivos[r].hash:
                     continue
                 raise OrbitError(f"já existe \"{alvo.name}\" diferente do outro lado")
@@ -822,7 +827,7 @@ class _Execucao:
                         self.res.divergencias.append(Divergencia(
                             uuid4().hex, "arquivo", None, rel, rel,
                             f"O arquivo \"{rel}\" mudou nos dois lados.",
-                            {"tamanho": il.tamanho}, {"tamanho": ib.tamanho},
+                            {"tamanho": il.tamanho}, {"tamanho": ib.tamanho, "caminho": rb},
                             ["local", "backup", "ambos"]))
                 elif il is not None:
                     self._copiar(self.L.caminho(rel), self.B.caminho(rb), True, rel,

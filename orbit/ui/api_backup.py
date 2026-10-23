@@ -217,7 +217,8 @@ class BackupApiMixin:
         raiz = Path(self._base if lado == "local" else svc.backup)
         caminho = None
         if div.tipo == "arquivo":
-            caminho = raiz / div.caminho
+            rel = div.caminho if lado == "local" else (div.backup.get("caminho") or div.caminho)
+            caminho = raiz / rel
         elif div.tipo == "revisao":
             lado_obj = _Lado(raiz, lado)
             lado_obj.descobrir()

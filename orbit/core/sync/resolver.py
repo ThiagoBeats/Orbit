@@ -220,20 +220,23 @@ def _revisao(ctx: _Ctx, div: Divergencia, escolha: str):
 # ---------- arquivo solto ----------
 def _arquivo(ctx: _Ctx, div: Divergencia, escolha: str):
     rel = div.caminho
-    pl, pb = ctx.L.caminho(rel), ctx.B.caminho(rel)
+    rel_b = div.backup.get("caminho") or rel  # pastas com nomes diferentes nos dois lados
+    pl, pb = ctx.L.caminho(rel), ctx.B.caminho(rel_b)
     if not pl.is_file() or not pb.is_file():
         raise OrbitError(f"O arquivo \"{rel}\" não existe mais nos dois lados.")
     if escolha == "local":
-        guardar_em_divergencias(ctx.B.raiz, rel, ctx.carimbo)
+        guardar_em_divergencias(ctx.B.raiz, rel_b, ctx.carimbo)
         copiar_seguro(pl, pb)
     elif escolha == "backup":
         guardar_em_divergencias(ctx.L.raiz, rel, ctx.carimbo)
         copiar_seguro(pb, pl)
     else:  # ambos: a versão do backup fica ao lado, com outro nome, nos dois lados
-        p = Path(rel)
-        novo = p.with_name(f"{p.stem} (backup {ctx.carimbo}){p.suffix}").as_posix()
-        mover_seguro(pb, ctx.B.caminho(novo))
-        copiar_seguro(ctx.B.caminho(novo), ctx.L.caminho(novo))
+        p, pbr = Path(rel), Path(rel_b)
+        sufixo = f" (backup {ctx.carimbo})"
+        novo_l = p.with_name(f"{p.stem}{sufixo}{p.suffix}").as_posix()
+        novo_b = pbr.with_name(f"{pbr.stem}{sufixo}{pbr.suffix}").as_posix()
+        mover_seguro(pb, ctx.B.caminho(novo_b))
+        copiar_seguro(ctx.B.caminho(novo_b), ctx.L.caminho(novo_l))
         copiar_seguro(pl, pb)
 
 

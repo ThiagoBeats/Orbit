@@ -398,3 +398,21 @@ def test_revisao_arquivada_de_um_lado_e_apagada_do_outro_e_restaurada(amb):
     for lado in (amb.base, amb.backup):
         nomes = {f.parent.name + "/" + f.name[-9:] for f in lado.rglob("*.pdf")}
         assert nomes == {"Antigos/Rev00.pdf", "Diagrama Elétrico/Rev01.pdf"}
+
+
+def test_pastas_renomeadas_no_backup_recebem_os_arquivos_certos(amb):
+    r, cli, p = _projeto(amb)
+    amb.engine().sincronizar()
+    cb = amb.backup / "Clientes" / "Cliente X"
+    (cb / "001 - Envasadora").rename(cb / "001 - Renomeado")
+    cb.rename(amb.backup / "Clientes" / "Cliente Renomeado")
+    nota = amb.base / "Clientes" / "Cliente X" / "001 - Envasadora" / "nota.txt"
+    nota.write_text("oi", encoding="utf-8")
+    novo = r.create_projeto(cli.id, "002", "Rotuladora")
+    res = amb.engine().sincronizar()
+    assert res.erro is None and res.divergencias == []
+    raiz_b = amb.backup / "Clientes" / "Cliente Renomeado"
+    assert (raiz_b / "001 - Renomeado" / "nota.txt").is_file()
+    assert (raiz_b / "002 - Rotuladora" / "projeto.json").is_file()
+    assert not (amb.backup / "Clientes" / "Cliente X").exists()
+    assert not (raiz_b / "001 - Envasadora").exists()
