@@ -40,6 +40,7 @@ _DIALOGO_PASTA = 20  # webview.FileDialog.FOLDER (pywebview 6.x)
 
 EXT_LOGO = (".png", ".jpg", ".jpeg", ".svg", ".webp")
 TAMANHO_MAX_LOGO = 5 * 1024 * 1024
+LOG_POR_PAGINA = 500
 PREFIXO_LOGO = "logo-empresa"
 
 VISUALIZAVEIS = (".pdf", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")
@@ -682,7 +683,17 @@ class Api(BackupApiMixin):
             if busca_n and busca_n not in _normalizar(json.dumps(d, ensure_ascii=False)):
                 continue
             linhas.append(d)
-        return {"linhas": linhas, "integridade": self._log.verificar().to_dict()}
+        linhas.reverse()  # mais recentes primeiro (o arquivo só cresce no fim)
+        def inteiro(chave, padrao):
+            v = f.get(chave)
+            return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else padrao
+        por_pagina = min(inteiro("por_pagina", LOG_POR_PAGINA), LOG_POR_PAGINA)
+        paginas = max(1, -(-len(linhas) // por_pagina))
+        pagina = min(inteiro("pagina", 1), paginas)
+        ini = (pagina - 1) * por_pagina
+        return {"linhas": linhas[ini:ini + por_pagina], "total": len(linhas),
+                "pagina": pagina, "paginas": paginas, "por_pagina": por_pagina,
+                "integridade": self._log.verificar().to_dict()}
 
     def verificar_log(self) -> dict:
         return self._chamar(self._verificar_log)

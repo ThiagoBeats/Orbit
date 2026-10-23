@@ -59,3 +59,18 @@ def test_api_verificar_log_alerta(api):
     assert api.verificar_log()["dados"]["integro"] is True
     acoes = [l["acao"] for l in api.ler_log({})["dados"]["linhas"]]
     assert acoes.count("adulteracao_detectada") == 1
+
+
+def test_ler_log_paginado(api):
+    for i in range(7):
+        api._log.registrar_acao("teste", {"i": i})
+    r = api.ler_log({"acao": "teste", "por_pagina": 3, "pagina": 2})["dados"]
+    assert r["total"] == 7 and r["pagina"] == 2 and r["paginas"] == 3
+    # mais recentes primeiro
+    assert [l["detalhes"]["i"] for l in r["linhas"]] == [3, 2, 1]
+    assert len(api.ler_log({"acao": "teste"})["dados"]["linhas"]) == 7  # padrão: 500 por página
+
+
+def test_ler_log_por_pagina_limitado(api):
+    r = api.ler_log({"por_pagina": 100000})["dados"]
+    assert r["por_pagina"] == 500

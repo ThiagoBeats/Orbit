@@ -262,3 +262,5 @@ main.painel { display:flex; gap:20px; padding:4px 32px 40px; }
 .div-lado .btn { margin-top:10px; }
 .secao-sub { margin-top:18px; font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); }
 .modal .aviso { color:var(--pend); }
+.tabela tr.linha-alerta td { color:var(--pend); }
+#log-selo .texto-sec { margin-top:8px; }

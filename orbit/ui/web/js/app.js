@@ -15,7 +15,7 @@
  *
  * Telas: cada arquivo em js/views/ registra Orbit.views[nome] = async (el, id) => {...}
  *   Rotas: #/clientes  #/cliente/<id>  #/projeto/<id>  #/maquinas  #/maquina/<id>
- *          #/envios  #/config
+ *          #/envios  #/config  #/log
  */
 
 const Orbit = window.Orbit = {
@@ -144,7 +144,7 @@ function embutirLogos(raiz = document) {
 const SECAO_DA_ROTA = {
   clientes: 'clientes', cliente: 'clientes', projeto: 'clientes',
   maquinas: 'maquinas', maquina: 'maquinas',
-  envios: 'envios', config: 'config',
+  envios: 'envios', config: 'config', log: 'log',
 };
 
 /* Logo da empresa no espaço reservado do cabeçalho. */
@@ -268,6 +268,7 @@ function mostrarDetalheConexao(r) {
 const TITULOS = {
   clientes: 'Clientes', cliente: 'Cliente', projeto: 'Projeto',
   maquinas: 'Máquinas Padrão', maquina: 'Máquina', envios: 'Envios', config: 'Configurações',
+  log: 'Log de ações',
 };
 
 function lerRota() {
@@ -401,6 +402,7 @@ async function recarregar() {
   await renderizar();
   testarConexao({ falha: true }); // sem await: não atrasa a primeira tela
   atualizarIndicadorBackup(false);
+  verificarLogNaAbertura();
 }
 
 window.addEventListener('hashchange', renderizar);
