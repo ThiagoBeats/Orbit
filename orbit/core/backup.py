@@ -76,9 +76,11 @@ def id_do_backup(pasta: Path) -> str:
             return v
     except (OrbitDataError, AttributeError):
         pass
+    if not Path(pasta).is_dir():
+        return "sem-id"  # backup fora do ar: nunca recria a pasta dele
     novo = uuid4().hex
     try:
-        arq.parent.mkdir(parents=True, exist_ok=True)
+        arq.parent.mkdir(exist_ok=True)
         write_json_atomic(arq, {"versao_formato": 1, "id": novo})
     except OSError:
         return "sem-id"
@@ -161,6 +163,8 @@ class BackupService:
         self._ultimo_status: StatusBackup | None = None
         self._ultima_comparacao = 0.0
         self._caches: dict[str, dict] = {}  # par -> cache de hash dos dois lados (entre rodadas)
+        self._reenvio: threading.Thread | None = None
+        self._ids: dict[str, str] = {}  # caminho do backup -> id (.orbit/backup.json)
 
     # ---------- utilitários ----------
     @property
@@ -171,7 +175,11 @@ class BackupService:
         destino = Path(caminho) if caminho else self.backup
         if destino is None:
             raise OrbitError("Nenhum backup configurado.")
-        par = f"{id_par(self.base, destino)}-{id_do_backup(destino)[:12]}"
+        chave = str(destino).casefold()
+        bid = self._ids.get(chave) or id_do_backup(destino)
+        if bid != "sem-id":
+            self._ids[chave] = bid  # fora do ar, continua usando o id já conhecido
+        par = f"{id_par(self.base, destino)}-{bid[:12]}"
         if sem_retrato:
             # recuperação: sem retrato toda diferença vira divergência (spec §8)
             pasta = self.sync_dir / "_temporarios" / uuid4().hex
@@ -356,6 +364,9 @@ class BackupService:
                               erro=f"Não foi possível acessar {self.backup}")
             self._ultimo_status = st
             return st
+        voltou = self._ultimo_status is not None and self._ultimo_status.estado == "inacessivel"
+        if voltou or self.pendentes():
+            self._reenviar_em_segundo_plano()  # o backup voltou durante a sessão
         intervalo = self.settings.intervalo_backup_min * 60
         if (not forcar_comparacao and self._ultimo_status is not None
                 and self._ultimo_status.estado != "inacessivel"
@@ -372,6 +383,26 @@ class BackupService:
         self._ultimo_status = st
         self._ultima_comparacao = time.monotonic()
         return st
+
+    def _reenviar_em_segundo_plano(self) -> None:
+        with self._trava:
+            if self._reenvio is not None and self._reenvio.is_alive():
+                return
+
+            def rodar():
+                try:
+                    self.enviar_pendencias_locais()
+                except Exception as e:
+                    self._falha(e)
+            self._reenvio = threading.Thread(target=rodar, daemon=True, name="orbit-reenvio")
+            self._reenvio.start()
+
+    def aguardar_reenvio(self, timeout: float = 30.0) -> bool:
+        t = self._reenvio
+        if t is None:
+            return True
+        t.join(timeout)
+        return not t.is_alive()
 
     def _ultima_sync(self) -> str | None:
         if self.backup is None:

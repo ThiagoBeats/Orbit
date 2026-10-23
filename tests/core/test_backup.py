@@ -278,3 +278,19 @@ def test_backup_trocado_no_mesmo_caminho_usa_outro_retrato(amb, tmp_path):
     amb.svc.configurar(destino)
     r2 = amb.svc.engine().retrato.pasta
     assert r1 != r2
+
+
+def test_backup_que_volta_na_mesma_sessao_recebe_as_pendencias(amb, tmp_path):
+    p = amb.projeto()
+    destino = tmp_path / "bk"
+    destino.mkdir()
+    amb.svc.configurar(destino)
+    destino.rename(tmp_path / "bk_fora")
+    amb.subir(p.id)
+    amb.svc.espelhar("container", p.id)
+    amb.svc.aguardar_espelhamento(10)
+    assert amb.svc.status(forcar_comparacao=True).estado == "inacessivel"
+    (tmp_path / "bk_fora").rename(destino)  # VPN/HD de volta, sem reiniciar
+    amb.svc.status(forcar_comparacao=True)
+    assert amb.svc.aguardar_reenvio(10)
+    assert len(list(destino.rglob("*.pdf"))) == 1
