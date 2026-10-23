@@ -35,7 +35,10 @@ function _agendarMeiaNoite() {
   }, amanha - agora);
 }
 
-Orbit.views.inicio = async (el, _id, aindaAtual) => {
+Orbit.views.inicio = async (conteudo, _id, aindaAtual) => {
+  // contêiner próprio a cada visita: os ouvintes de clique não se acumulam em #conteudo
+  const el = document.createElement('div');
+  conteudo.appendChild(el);
   let dia = null; // null = hoje
   const projetos = await opcoesProjetos(true);
   if (!aindaAtual()) return;

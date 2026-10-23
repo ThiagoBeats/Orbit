@@ -22,7 +22,7 @@ function htmlItem(it, { projeto = true, autor = false } = {}) {
   const proj = projeto && it.container_id
     ? `<a class="proj" href="${it.container_nome ? '#/projeto/' + encodeURIComponent(it.container_id) : '#'}" data-proj="${esc(it.container_id)}">${esc(it.container_nome || 'projeto')}</a>`
     : '';
-  return `<div class="item${feito ? ' feito' : ''}" data-item="${esc(it.id)}" data-tipo="${esc(it.tipo)}">
+  return `<div class="item${feito ? ' feito' : ''}" data-item="${esc(it.id)}" data-tipo="${esc(it.tipo)}" data-cid="${esc(it.container_id || '')}">
     ${ok ? `<button type="button" class="chk" data-ok title="${feito ? 'Desmarcar' : 'Marcar como feito'}">${feito ? '✓' : ''}</button>` : '<span class="chk vazio"></span>'}
     <div class="txt"><span class="texto" data-editar title="Clique para editar">${esc(it.texto)}</span>${tag}${proj ? `<div>${proj}</div>` : ''}${
       autor ? `<div class="texto-sec autor">${esc(it.usuario)} · ${esc(formatarDataHora(it.alterado_em))}</div>` : ''}</div>
@@ -64,7 +64,7 @@ function ligarItens(raiz, recarregar) {
     } else if (e.target.closest('[data-editar]')) {
       _editarNaLinha(linha, recarregar);
     } else if (e.target.closest('[data-menu-item]')) {
-      _menuItem(id, linha.dataset.tipo, recarregar);
+      _menuItem(id, linha.dataset.tipo, linha.dataset.cid || null, recarregar);
     }
   });
 }
@@ -94,12 +94,12 @@ function _editarNaLinha(linha, recarregar) {
   campo.addEventListener('blur', () => terminar(true));
 }
 
-async function _menuItem(id, tipo, recarregar) {
+async function _menuItem(id, tipo, cid, recarregar) {
   const projetos = await opcoesProjetos();
   abrirPopup({
     titulo: 'Anotação',
     corpoHtml: `<div class="field"><label>Tipo</label><select id="mi-tipo">${_optionsTipos(tipo)}</select></div>
-      <div class="field"><label>Projeto</label><select id="mi-proj">${_optionsProjetos(projetos, null)}</select></div>
+      <div class="field"><label>Projeto</label><select id="mi-proj">${_optionsProjetos(projetos, cid)}</select></div>
       <p class="texto-sec">Atividades são sempre suas. Anotações com projeto ficam visíveis para quem abrir o projeto.</p>`,
     botoes: [
       { texto: 'Excluir', acao: async () => {
@@ -110,7 +110,10 @@ async function _menuItem(id, tipo, recarregar) {
       { texto: 'Salvar', primario: true, acao: async popup => {
         const t = popup.elemento.querySelector('#mi-tipo').value;
         const p = popup.elemento.querySelector('#mi-proj').value || null;
-        await api('editar_item', id, { tipo: t, container_id: p });
+        const dados = {};
+        if (t !== tipo) dados.tipo = t;
+        if (p !== cid) dados.container_id = p; // só manda o projeto se ele mudou
+        if (Object.keys(dados).length) await api('editar_item', id, dados);
         recarregar();
       } },
     ],
