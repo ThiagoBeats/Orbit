@@ -133,6 +133,7 @@ class BackupService:
         self._sincronizando = False
         self._ultimo_status: StatusBackup | None = None
         self._ultima_comparacao = 0.0
+        self._caches: dict[str, dict] = {}  # par -> cache de hash dos dois lados (entre rodadas)
 
     # ---------- utilitários ----------
     @property
@@ -143,9 +144,10 @@ class BackupService:
         destino = Path(caminho) if caminho else self.backup
         if destino is None:
             raise OrbitError("Nenhum backup configurado.")
-        return SyncEngine(self.base, destino, self.identity,
-                          Retrato(self.sync_dir / id_par(self.base, destino)), self.log,
-                          agora=self.agora, registrar=self.registrar)
+        par = id_par(self.base, destino)
+        return SyncEngine(self.base, destino, self.identity, Retrato(self.sync_dir / par),
+                          self.log, agora=self.agora, registrar=self.registrar,
+                          caches=self._caches.setdefault(par, {}))
 
     def _falha(self, e: BaseException) -> None:
         if self.registrar:

@@ -194,7 +194,8 @@ def _escrever_json(caminho: Path, dados) -> None:
 class SyncEngine:
     def __init__(self, base: Path, backup: Path, identity: Identity, retrato: Retrato,
                  log: ActionLog | None, agora: Callable[[], datetime] = datetime.now,
-                 registrar: Callable[[BaseException], None] | None = None):
+                 registrar: Callable[[BaseException], None] | None = None,
+                 caches: dict | None = None):
         self.base = Path(base)
         self.backup = Path(backup)
         self.identity = identity
@@ -202,8 +203,26 @@ class SyncEngine:
         self.log = log
         self.agora = agora
         self.registrar = registrar
-        self._cache_l: dict[str, InfoArquivo] = {}
-        self._cache_b: dict[str, InfoArquivo] = {}
+        # cache de hash por lado; o BackupService passa o mesmo dict entre rodadas
+        self._caches = caches if caches is not None else {}
+        self._caches.setdefault("l", {})
+        self._caches.setdefault("b", {})
+
+    @property
+    def _cache_l(self) -> dict:
+        return self._caches["l"]
+
+    @_cache_l.setter
+    def _cache_l(self, v: dict) -> None:
+        self._caches["l"] = v
+
+    @property
+    def _cache_b(self) -> dict:
+        return self._caches["b"]
+
+    @_cache_b.setter
+    def _cache_b(self, v: dict) -> None:
+        self._caches["b"] = v
 
     # ---------- API ----------
     def comparar(self, cancelar: Callable[[], bool] = lambda: False,

@@ -231,3 +231,21 @@ def test_nao_envia_sozinho_se_o_backup_tambem_mudou(amb, tmp_path):
     novo = BackupService(amb.base, amb.settings, PC1, amb.log, tmp_path / "sync")
     novo.enviar_pendencias_locais()
     assert list(destino.rglob("*.pdf")) == []
+
+
+def test_status_repetido_nao_recalcula_hash(amb, tmp_path, monkeypatch):
+    from orbit.core.sync import varredura
+    p = amb.projeto()
+    amb.subir(p.id)
+    destino = tmp_path / "bk"
+    destino.mkdir()
+    amb.svc.configurar(destino)
+    amb.svc.status(forcar_comparacao=True)
+    chamadas = []
+    original = varredura.calcular_hash
+    monkeypatch.setattr(varredura, "calcular_hash", lambda c: chamadas.append(c) or original(c))
+    amb.svc.status(forcar_comparacao=True)
+    amb.svc.espelhar("container", p.id)
+    amb.svc.aguardar_espelhamento(10)
+    # só o log de ações muda de verdade a cada sincronização
+    assert [c for c in chamadas if not str(c).endswith("acoes.log")] == []
