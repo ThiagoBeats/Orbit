@@ -12,12 +12,16 @@ Orbit.views.clientes = async (el, _id, aindaAtual) => {
     <div class="barra">
       <input type="search" id="cli-busca" class="busca" placeholder="Buscar cliente ou projeto…" autocomplete="off">
       <div class="barra-botoes">
+        <button type="button" class="btn" id="cli-sincronizar" hidden>Sincronizar</button>
         <button type="button" class="btn" id="cli-novo-projeto">Novo projeto</button>
         <button type="button" class="btn solid" id="cli-novo">Novo cliente</button>
       </div>
     </div>
     <div class="pagina"><div class="grid-cartoes" id="cli-lista"></div></div>`;
   const lista = el.querySelector('#cli-lista');
+  const btSync = el.querySelector('#cli-sincronizar');
+  btSync.hidden = !(Orbit.backup && Orbit.backup.caminho);
+  btSync.addEventListener('click', () => sincronizarAgora().catch(() => {}));
   const campo = el.querySelector('#cli-busca');
   let seq = 0;
 

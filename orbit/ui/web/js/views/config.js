@@ -60,6 +60,8 @@ Orbit.views.config = async el => {
       </div>
     </div>`;
 
+  montarSecaoBackup(el);
+
   /* ---- tema ---- */
   const marcar = tema => el.querySelectorAll('#cfg-tema .opcao').forEach(o =>
     o.classList.toggle('on', o.dataset.tema === tema));

@@ -6,6 +6,7 @@ todo o estado interno fica em atributos com "_" na frente.
 Convenção: todo método público devolve {"ok": True, "dados": ...} ou
 {"ok": False, "erro": "..."}; ver _chamar().
 """
+import json
 import os
 import re
 import shutil
@@ -16,8 +17,9 @@ from dataclasses import asdict
 from datetime import date, datetime
 from pathlib import Path
 
+from orbit.core.actionlog import ActionLog
 from orbit.core.config import (TEMAS, add_tipo, load_shared_config, load_user_settings,
-                               save_shared_config, save_user_settings)
+                               save_shared_config, save_user_settings, user_settings_path)
 from orbit.core.connection import pasta_existe, testar_pasta
 from orbit.core.email import EmailDraft, EmailService, SelecaoEnvio
 from orbit.core.errors import LockHeld, OrbitDataError, OrbitError
@@ -30,6 +32,7 @@ from orbit.core.presence import PresenceService
 from orbit.core.reconcile import find_untracked, register_untracked
 from orbit.core.repository import Repository
 from orbit.core.revisions import RevisionService
+from orbit.ui.api_backup import BackupApiMixin
 from orbit.ui.fileserver import FileServer
 
 _DIALOGO_ARQUIVO = 10  # webview.FileDialog.OPEN (pywebview 6.x)
@@ -37,6 +40,7 @@ _DIALOGO_PASTA = 20  # webview.FileDialog.FOLDER (pywebview 6.x)
 
 EXT_LOGO = (".png", ".jpg", ".jpeg", ".svg", ".webp")
 TAMANHO_MAX_LOGO = 5 * 1024 * 1024
+LOG_POR_PAGINA = 500
 PREFIXO_LOGO = "logo-empresa"
 
 VISUALIZAVEIS = (".pdf", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp")
@@ -75,10 +79,17 @@ def caminho_log_padrao() -> Path:
     return Path(os.environ["APPDATA"]) / "Orbit" / "orbit.log"
 
 
-class Api:
+class Api(BackupApiMixin):
     def __init__(self, settings_path: Path | None = None, log_path: Path | None = None,
-                 outlook=None, timeout_conexao: float = 5.0):
+                 outlook=None, timeout_conexao: float = 5.0, ancoras_path: Path | None = None):
         self._timeout_conexao = timeout_conexao
+        # âncoras do log de ações: junto das preferências desta máquina (fora da pasta base)
+        pasta_prefs = (Path(settings_path).parent if settings_path
+                       else user_settings_path().parent)
+        self._ancoras_path = Path(ancoras_path) if ancoras_path else pasta_prefs / "ancoras.json"
+        self._sync_dir = pasta_prefs / "sync"  # retratos da sincronização (fora da pasta base)
+        self._log: ActionLog | None = None
+        self._iniciar_estado_backup()
         self._outlook = outlook if outlook is not None else OutlookClient()
         self._settings_path = settings_path
         self._log_path = log_path
@@ -148,13 +159,18 @@ class Api:
         fileserver = FileServer(base)
         fileserver.start()  # se falhar, o estado anterior continua valendo
         antigo = self._fileserver
-        repo = Repository(base, current_identity(), config)
+        ident = current_identity()
+        log = ActionLog(base, ident, self._ancoras_path, registrar=self._registrar_erro)
+        repo = Repository(base, ident, config, log=log, registrar=self._registrar_erro)
         self._sair_de_todos()  # presenças gravadas na base anterior
         self._base, self._config, self._fileserver = base, config, fileserver
-        self._repo = repo
+        self._repo, self._log = repo, log
+        self._backup = self._criar_backup_service(base, ident, log, repo)
         if antigo is not None:
             antigo.stop()
         self._erro_base = None
+        threading.Thread(target=self._ao_abrir_backup, daemon=True,
+                         name="orbit-backup-abertura").start()
 
     def _exigir_base(self) -> Path:
         if self._base is None:
@@ -198,6 +214,7 @@ class Api:
             raise OrbitError(f"Tema inválido: {tema}")
         self._settings.tema = tema
         save_user_settings(self._settings, self._settings_path)
+        self._logar("configuracao_alterada", {"tema": tema})
         return self._dados_settings()
 
     def get_config(self) -> dict:
@@ -231,8 +248,22 @@ class Api:
         self._exigir_base()
         return load_shared_config(self._base)
 
+    def _logar(self, acao: str, detalhes: dict) -> None:
+        """Grava no log de ações; uma falha aqui nunca desfaz a operação."""
+        if self._log is None:
+            return
+        try:
+            self._log.registrar_acao(acao, detalhes)
+        except Exception as e:
+            self._registrar_erro(e)
+
     def _aplicar_config(self, nova) -> None:
         save_shared_config(self._base, nova)
+        self._logar("configuracao_alterada", {
+            "tipos": [{"id": t.id, "nome": t.nome, "ativo": t.ativo} for t in nova.tipos],
+            "status": list(nova.status), "logo_empresa": nova.logo_empresa})
+        if self._repo is not None:
+            self._repo._avisar("config", None)
         # mesmo objeto (o Repository o referencia): atualiza no lugar
         self._config.tipos, self._config.status = nova.tipos, nova.status
         self._config.logo_empresa = nova.logo_empresa
@@ -591,10 +622,18 @@ class Api:
                 self._apagar_presenca(pasta)
 
     def ao_fechar_janela(self) -> None:
-        """Handler de window.events.closing: apaga as presenças desta janela."""
+        """Handler de window.events.closing: apaga as presenças desta janela e
+        cancela a sincronização em andamento (para não deixar a trava presa)."""
         try:
             self._sair_de_todos()
         except Exception as e:  # nunca impede o fechamento
+            self._registrar_erro(e)
+        try:
+            self._job_cancelar.set()
+            self._aguardar_job(10)
+            if self._backup is not None:
+                self._backup.aguardar_espelhamento(5)
+        except Exception as e:
             self._registrar_erro(e)
 
     ao_fechar_janela._serializable = False
@@ -618,7 +657,58 @@ class Api:
         if not svc.liberar_abandonada(lock):
             raise OrbitError("A trava ainda está em uso (tem menos de 10 minutos) e não "
                              "pode ser liberada.")
+        self._logar("trava_liberada", {"container_id": c.id, "container_nome": c.nome,
+                                       "tipo_id": str(tipo_id)})
         return None
+
+    # --- log de ações ---------------------------------------------------
+
+    def ler_log(self, filtros=None) -> dict:
+        return self._chamar(self._ler_log, filtros)
+
+    def _ler_log(self, filtros):
+        self._exigir_base()
+        f = filtros if isinstance(filtros, dict) else {}
+        def texto(chave):
+            v = f.get(chave)
+            return v.strip() if isinstance(v, str) and v.strip() else None
+        de, ate, usuario = texto("de"), texto("ate"), texto("usuario")
+        cid, acao, busca = texto("container_id"), texto("acao"), texto("texto")
+        busca_n = _normalizar(busca) if busca else None
+        linhas = []
+        for l in self._log.ler():
+            if de and l.data_hora[:10] < de:
+                continue
+            if ate and l.data_hora[:10] > ate:
+                continue
+            if usuario and l.usuario.casefold() != usuario.casefold():
+                continue
+            if cid and l.detalhes.get("container_id") != cid:
+                continue
+            if acao and l.acao != acao:
+                continue
+            d = l.to_dict()
+            if busca_n and busca_n not in _normalizar(json.dumps(d, ensure_ascii=False)):
+                continue
+            linhas.append(d)
+        linhas.reverse()  # mais recentes primeiro (o arquivo só cresce no fim)
+        def inteiro(chave, padrao):
+            v = f.get(chave)
+            return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else padrao
+        por_pagina = min(inteiro("por_pagina", LOG_POR_PAGINA), LOG_POR_PAGINA)
+        paginas = max(1, -(-len(linhas) // por_pagina))
+        pagina = min(inteiro("pagina", 1), paginas)
+        ini = (pagina - 1) * por_pagina
+        return {"linhas": linhas[ini:ini + por_pagina], "total": len(linhas),
+                "pagina": pagina, "paginas": paginas, "por_pagina": por_pagina,
+                "integridade": self._log.verificar().to_dict()}
+
+    def verificar_log(self) -> dict:
+        return self._chamar(self._verificar_log)
+
+    def _verificar_log(self):
+        self._exigir_base()
+        return self._log.alertar_se_adulterado().to_dict()
 
     def obter_painel(self, container_id) -> dict:
         return self._chamar(self._obter_painel, container_id)

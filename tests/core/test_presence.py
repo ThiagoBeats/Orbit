@@ -391,3 +391,20 @@ def test_upload_com_falha_ao_liberar_registra_e_devolve_revisao(repo, ctx, monke
         RevisionService(repo, presence=presenca).enviar_revisao(
             p.id, TIPO2, _arq(origem, "b.pdf"), [], "Nada", "m")
     assert len(erros) == 2
+
+
+def test_renovar_atualiza_a_hora_e_respeita_o_dono(tmp_path):
+    from datetime import datetime, timedelta
+    from orbit.core.identity import Identity
+    from orbit.core.presence import PresenceService
+    t = [datetime(2026, 10, 23, 8, 0, 0)]
+    svc = PresenceService(Identity("thiago", "PC1"), agora=lambda: t[0])
+    trava = svc.travar(tmp_path, "_sincronizacao")
+    t[0] += timedelta(minutes=9)
+    assert svc.renovar(trava) is True
+    assert svc._ler_trava(trava).desde == t[0]
+    t[0] += timedelta(minutes=9)
+    assert not svc.trava_abandonada(trava)  # 9 min desde a renovação
+    outra = type(trava)(trava)
+    outra.token = "x" * 32
+    assert svc.renovar(outra) is False

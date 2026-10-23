@@ -126,18 +126,40 @@ def add_tipo(cfg: SharedConfig, nome: str) -> TipoDocumento:
     return tipo
 
 
+INTERVALO_BACKUP_PADRAO = 10
+INTERVALO_BACKUP_MIN, INTERVALO_BACKUP_MAX = 1, 1440
+
+
+def limitar_intervalo(valor) -> int:
+    """Intervalo de verificação do backup em minutos, entre 1 e 1440."""
+    if isinstance(valor, bool):
+        return INTERVALO_BACKUP_PADRAO
+    try:
+        v = int(valor)
+    except (TypeError, ValueError):
+        return INTERVALO_BACKUP_PADRAO
+    return max(INTERVALO_BACKUP_MIN, min(INTERVALO_BACKUP_MAX, v))
+
+
 @dataclass
 class UserSettings:
     pasta_base: str | None = None
     tema: str = "escuro"
+    backup: str | None = None  # pasta de backup desta máquina (spec de backup §4)
+    intervalo_backup_min: int = INTERVALO_BACKUP_PADRAO
 
     def to_dict(self) -> dict:
-        return {"versao_formato": VERSAO_FORMATO, "pasta_base": self.pasta_base, "tema": self.tema}
+        return {"versao_formato": VERSAO_FORMATO, "pasta_base": self.pasta_base,
+                "tema": self.tema, "backup": self.backup,
+                "intervalo_backup_min": self.intervalo_backup_min}
 
     @classmethod
     def from_dict(cls, d: dict) -> "UserSettings":
         tema = d.get("tema", "escuro")
-        return cls(d.get("pasta_base"), tema if tema in TEMAS else "escuro")
+        backup = d.get("backup")
+        return cls(d.get("pasta_base"), tema if tema in TEMAS else "escuro",
+                   backup if isinstance(backup, str) and backup else None,
+                   limitar_intervalo(d.get("intervalo_backup_min", INTERVALO_BACKUP_PADRAO)))
 
 
 def user_settings_path() -> Path:

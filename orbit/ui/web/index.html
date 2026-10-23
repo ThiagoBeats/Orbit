@@ -7,6 +7,28 @@
 <link rel="stylesheet" href="css/orbit.css">
 </head>
 <body>
+<!-- Abertura animada (spec de backup §10, opção A). Fica no HTML para aparecer no 1º quadro. -->
+<div id="abertura" aria-hidden="true">
+  <svg class="ab-logo" viewBox="0 0 100 100" width="150" height="150">
+    <defs><clipPath id="ab-frente"><rect x="0" y="52" width="100" height="48"/></clipPath></defs>
+    <g transform="rotate(-20 50 52)">
+      <ellipse class="ab-orbita" cx="50" cy="52" rx="44" ry="14" fill="none" stroke-width="4.5" stroke-linecap="round"/>
+    </g>
+    <g class="ab-folha">
+      <path class="ab-papel" d="M37 22 h19 l12 12 v42 a3.5 3.5 0 0 1 -3.5 3.5 h-27.5 a3.5 3.5 0 0 1 -3.5 -3.5 v-50.5 a3.5 3.5 0 0 1 3.5 -3.5z"/>
+      <path class="ab-dobra" d="M56 22 v8.5 a3.5 3.5 0 0 0 3.5 3.5 h8.5z"/>
+      <line class="ab-linha" x1="41" y1="49" x2="62" y2="49" stroke-width="4" stroke-linecap="round"/>
+      <line class="ab-linha" x1="41" y1="59" x2="56" y2="59" stroke-width="4" stroke-linecap="round"/>
+    </g>
+    <g transform="rotate(-20 50 52)">
+      <ellipse class="ab-orbita" cx="50" cy="52" rx="44" ry="14" fill="none" stroke-width="4.5" stroke-linecap="round" clip-path="url(#ab-frente)"/>
+      <circle class="ab-sat" r="6">
+        <animateMotion dur="2.5s" repeatCount="indefinite" path="M94,52 a44,14 0 1,1 -88,0 a44,14 0 1,1 88,0"/>
+      </circle>
+    </g>
+  </svg>
+  <div class="ab-texto"><span id="ab-letras"></span><i class="ab-cursor"></i></div>
+</div>
 <header>
   <div class="logo">
     <span class="marca" data-logo-orbit><img src="img/orbit-logo.svg" alt=""></span>
@@ -18,13 +40,16 @@
       <a href="#/clientes" data-secao="clientes">Clientes</a>
       <a href="#/maquinas" data-secao="maquinas">Máquinas Padrão</a>
       <a href="#/envios" data-secao="envios">Envios</a>
+      <a href="#/log" data-secao="log">Log</a>
       <a href="#/config" data-secao="config">Configurações</a>
     </nav>
+    <div class="conexao" id="backup-ind"></div>
     <div class="conexao" id="conexao"></div>
   </div>
 </header>
 <div id="conteudo"></div>
 
+<script src="js/abertura.js"></script>
 <script src="js/modal.js"></script>
 <script src="js/app.js"></script>
 <script src="js/popups/dados.js"></script>
@@ -38,5 +63,8 @@
 <script src="js/views/maquinas.js"></script>
 <script src="js/views/envios.js"></script>
 <script src="js/views/config.js"></script>
+<script src="js/popups/divergencia.js"></script>
+<script src="js/popups/backup.js"></script>
+<script src="js/views/log.js"></script>
 </body>
 </html>

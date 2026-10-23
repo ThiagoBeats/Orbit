@@ -15,7 +15,7 @@
  *
  * Telas: cada arquivo em js/views/ registra Orbit.views[nome] = async (el, id) => {...}
  *   Rotas: #/clientes  #/cliente/<id>  #/projeto/<id>  #/maquinas  #/maquina/<id>
- *          #/envios  #/config
+ *          #/envios  #/config  #/log
  */
 
 const Orbit = window.Orbit = {
@@ -144,7 +144,7 @@ function embutirLogos(raiz = document) {
 const SECAO_DA_ROTA = {
   clientes: 'clientes', cliente: 'clientes', projeto: 'clientes',
   maquinas: 'maquinas', maquina: 'maquinas',
-  envios: 'envios', config: 'config',
+  envios: 'envios', config: 'config', log: 'log',
 };
 
 /* Logo da empresa no espaço reservado do cabeçalho. */
@@ -268,6 +268,7 @@ function mostrarDetalheConexao(r) {
 const TITULOS = {
   clientes: 'Clientes', cliente: 'Cliente', projeto: 'Projeto',
   maquinas: 'Máquinas Padrão', maquina: 'Máquina', envios: 'Envios', config: 'Configurações',
+  log: 'Log de ações',
 };
 
 function lerRota() {
@@ -332,9 +333,11 @@ function telaBoasVindas() {
          <b>.orbit</b> com as configurações compartilhadas.</p>
       ${erro ? `<p class="aviso">${esc(erro)}</p>` : ''}
       <button type="button" class="btn solid" id="btn-pasta-base">Escolher pasta base</button>
+      <button type="button" class="btn" id="btn-recuperar">Recuperar de um backup</button>
     </div></div>`;
   embutirLogos(el);
   el.querySelector('#btn-pasta-base').addEventListener('click', escolherPastaBase);
+  el.querySelector('#btn-recuperar').addEventListener('click', () => restaurarPcNovo());
 }
 
 /* Pasta base configurada mas inacessível na abertura (rede fora, pendrive removido):
@@ -386,6 +389,7 @@ async function recarregar() {
     if (Orbit.settings.pasta_base) { await telaSemBase(true); return; }
     Orbit.conexao = null;
     _pintarIndicador(null, false);
+    _pintarBackup(null);
     telaBoasVindas();
     return;
   }
@@ -397,6 +401,8 @@ async function recarregar() {
   if (!location.hash) location.hash = '#/clientes';
   await renderizar();
   testarConexao({ falha: true }); // sem await: não atrasa a primeira tela
+  atualizarIndicadorBackup(false);
+  verificarLogNaAbertura();
 }
 
 window.addEventListener('hashchange', renderizar);
@@ -406,7 +412,9 @@ function iniciar() {
   if (_iniciado || !(window.pywebview && window.pywebview.api)) return;
   _iniciado = true;
   carregarLogo();
-  recarregar().catch(e => { if (!(e instanceof ErroApi)) console.error(e); });
+  recarregar()
+    .catch(e => { if (!(e instanceof ErroApi)) console.error(e); })
+    .finally(() => Abertura.concluir()); // a animação só existe na abertura
 }
 
 window.addEventListener('pywebviewready', iniciar);
