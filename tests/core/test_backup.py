@@ -207,3 +207,27 @@ def test_restaurar_pc_novo_copia_e_confere(amb, tmp_path):
     assert (nova / "Clientes" / "Cliente X" / "001 - Envasadora" / "projeto.json").is_file()
     acoes = [l.acao for l in ActionLog(nova, PC1, tmp_path / "anc2.json").ler()]
     assert "recuperacao" in acoes
+
+
+def test_enviar_pendencias_apos_reiniciar(amb, tmp_path):
+    p = amb.projeto()
+    destino = tmp_path / "bk"
+    destino.mkdir()
+    amb.svc.configurar(destino)
+    amb.subir(p.id)  # alteração local, sem espelhar (programa fechado/reaberto)
+    novo = BackupService(amb.base, amb.settings, PC1, amb.log, tmp_path / "sync")
+    assert novo.pendentes() == set()
+    novo.enviar_pendencias_locais()
+    assert len(list(destino.rglob("*.pdf"))) == 1
+
+
+def test_nao_envia_sozinho_se_o_backup_tambem_mudou(amb, tmp_path):
+    p = amb.projeto()
+    destino = tmp_path / "bk"
+    destino.mkdir()
+    amb.svc.configurar(destino)
+    amb.subir(p.id)
+    (destino / "Clientes" / "Cliente X" / "nota.txt").write_text("do servidor")
+    novo = BackupService(amb.base, amb.settings, PC1, amb.log, tmp_path / "sync")
+    novo.enviar_pendencias_locais()
+    assert list(destino.rglob("*.pdf")) == []

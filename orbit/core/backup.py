@@ -286,8 +286,25 @@ class BackupService:
         """Backup acessível de novo: envia sozinho o que mudou localmente sem divergência."""
         if self.backup is None or not pasta_existe(self.backup, TIMEOUT_ACESSO_S):
             return
-        for escopo, id in sorted(self.pendentes(), key=lambda p: (p[0], p[1] or "")):
-            self._espelhar_agora(escopo, id)
+        pend = self.pendentes()
+        if pend:
+            for escopo, id in sorted(pend, key=lambda p: (p[0], p[1] or "")):
+                self._espelhar_agora(escopo, id)
+            return
+        # nada registrado (ex.: o programa foi fechado com o backup fora do ar): envia
+        # sozinho só quando o que mudou é desta máquina e não há divergência
+        try:
+            comp = self._comparar()
+        except OrbitError as e:
+            self._falha(e)
+            return
+        so_local = (comp.enviar or comp.restaurar_backup or comp.containers)
+        if (so_local and not comp.divergencias and not comp.receber
+                and not comp.restaurar_local):
+            try:
+                self.sincronizar()
+            except (LockHeld, OrbitError) as e:
+                self._falha(e)
 
     # ---------- status ----------
     def _comparar(self) -> Comparacao:
