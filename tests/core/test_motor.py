@@ -431,3 +431,17 @@ def test_espelhar_um_projeto_nao_apaga_divergencias_de_outro(amb):
     eng.sincronizar(somente_container=p2.id)
     pend = eng.retrato.divergencias_pendentes()
     assert [d["escopo_id"] for d in pend] == [p.id]
+
+
+def test_trava_de_sincronizacao_e_renovada_durante_a_rodada(amb, monkeypatch):
+    import time
+    renovadas = []
+    original = PresenceService.renovar
+    monkeypatch.setattr(PresenceService, "renovar",
+                        lambda self, t: renovadas.append(1) or original(self, t))
+    eng = amb.engine()
+    monkeypatch.setattr(motor, "RENOVAR_TRAVA_S", 0.05)
+    with eng.trava_sincronizacao():
+        time.sleep(0.3)
+    assert renovadas
+    assert not (amb.backup / ".orbit" / "travas" / "_sincronizacao.lock").exists()

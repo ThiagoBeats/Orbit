@@ -18,6 +18,7 @@ import copy
 import json
 import os
 import shutil
+import threading
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -40,6 +41,7 @@ from orbit.core.sync.varredura import (CONFIG_REL, LOG_REL, PASTA_DIVERGENCIAS, 
                                        Retrato, eh_json_orbit, varrer)
 
 TRAVA_SYNC = "_sincronizacao"
+RENOVAR_TRAVA_S = 60  # a trava de sincronização é renovada enquanto a rodada dura
 TRAVA_CONTAINER = "_container"
 
 
@@ -255,9 +257,23 @@ class SyncEngine:
         """Uma sincronização (ou resolução) por backup de cada vez."""
         svc = PresenceService(self.identity, agora=datetime.now, registrar=self.registrar)
         trava = self._travar_sync(svc)
+        parar = threading.Event()
+
+        def renovar():
+            while not parar.wait(RENOVAR_TRAVA_S):
+                try:
+                    if not svc.renovar(trava):
+                        return
+                except Exception as e:
+                    if self.registrar:
+                        self.registrar(e)
+        t = threading.Thread(target=renovar, daemon=True, name="orbit-renova-sync")
+        t.start()
         try:
             yield
         finally:
+            parar.set()
+            t.join(5)
             svc.liberar_varios([trava])
 
     def juntar_logs(self) -> None:

@@ -276,6 +276,36 @@ class PresenceService:
         trava.token = token
         return trava
 
+    def renovar(self, trava: TravaUpload) -> bool:
+        """Atualiza a hora da trava (operação longa ainda em andamento).
+
+        Só renova se a trava ainda for deste dono (token). Devolve False se ela
+        foi trocada ou não existe mais.
+        """
+        token = getattr(trava, "token", None)
+        info = self._ler_trava(Path(trava))
+        if not token or info is None or info.token != token:
+            return False
+        dados = json.dumps({
+            "versao_formato": 1,
+            "usuario": self.identity.usuario,
+            "computador": self.identity.computador,
+            "desde": self._agora_iso(),
+            "token": token,
+        }, ensure_ascii=False).encode("utf-8")
+        tmp = Path(trava).with_name(f"{Path(trava).name}.{uuid4().hex}.renovando")
+        try:
+            tmp.write_bytes(dados)
+            _com_retentativas(os.replace, tmp, Path(trava))  # o arquivo é a nossa trava
+        except OSError as e:
+            self._registrar(e)
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return False
+        return True
+
     def trava_abandonada(self, lock: Path, max_idade_s: int = MAX_IDADE_TRAVA_S) -> bool:
         info = self._ler_trava(Path(lock))
         return info is not None and self._idade(info.desde) > max_idade_s

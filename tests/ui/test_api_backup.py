@@ -174,3 +174,19 @@ def test_definir_intervalo(amb):
     assert a.definir_intervalo_backup(30)["dados"] == 30
     assert load_user_settings(settings).intervalo_backup_min == 30
     assert a.definir_intervalo_backup(0)["dados"] == 1
+
+
+def test_fechar_janela_cancela_a_sincronizacao(amb):
+    import threading
+    a = amb[0]
+    comecou = threading.Event()
+
+    def demorado(progresso, cancelado):
+        comecou.set()
+        while not cancelado():
+            pass
+        return {"cancelado": True}
+    a._iniciar_job(demorado)
+    assert comecou.wait(5)
+    a.ao_fechar_janela()
+    assert a._job["rodando"] is False and a._job["resultado"]["cancelado"] is True

@@ -622,10 +622,18 @@ class Api(BackupApiMixin):
                 self._apagar_presenca(pasta)
 
     def ao_fechar_janela(self) -> None:
-        """Handler de window.events.closing: apaga as presenças desta janela."""
+        """Handler de window.events.closing: apaga as presenças desta janela e
+        cancela a sincronização em andamento (para não deixar a trava presa)."""
         try:
             self._sair_de_todos()
         except Exception as e:  # nunca impede o fechamento
+            self._registrar_erro(e)
+        try:
+            self._job_cancelar.set()
+            self._aguardar_job(10)
+            if self._backup is not None:
+                self._backup.aguardar_espelhamento(5)
+        except Exception as e:
             self._registrar_erro(e)
 
     ao_fechar_janela._serializable = False
