@@ -157,10 +157,13 @@ class Retrato:
     def ultima_sync(self) -> str | None:
         return self._estado_atual().get("ultima_sync")
 
-    def json_base(self, rel: str):
+    def todos_jsons(self) -> dict:
         if self._jsons is None:
             self._jsons = self._ler(self._arq_jsons).get("jsons") or {}
-        return self._jsons.get(rel)
+        return dict(self._jsons)
+
+    def json_base(self, chave: str):
+        return self.todos_jsons().get(chave)
 
     def salvar(self, arquivos: dict[str, InfoArquivo], jsons: dict[str, object],
                quando: str) -> None:
