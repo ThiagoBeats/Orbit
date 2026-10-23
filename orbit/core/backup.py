@@ -10,8 +10,10 @@
 from __future__ import annotations
 
 import queue
+import shutil
 import threading
 import time
+from uuid import uuid4
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -23,7 +25,10 @@ from orbit.core.connection import pasta_existe
 from orbit.core.errors import LockHeld, OrbitError
 from orbit.core.identity import Identity
 from orbit.core.sync.motor import Comparacao, ResultadoSync, SyncEngine, copiar_seguro
-from orbit.core.sync.varredura import CONFIG_REL, Retrato, calcular_hash, id_par, varrer
+from orbit.core.jsonstore import read_json, write_json_atomic
+from orbit.core.errors import OrbitDataError
+from orbit.core.sync.varredura import (CONFIG_REL, ID_BACKUP_REL, Retrato, calcular_hash,
+                                       id_par, varrer)
 
 NUVENS = ("onedrive", "google drive", "googledrive", "meu drive", "my drive", "dropbox",
           "iclouddrive", "icloud drive")
@@ -56,6 +61,28 @@ def _dentro(a: Path, b: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def id_do_backup(pasta: Path) -> str:
+    """Identidade do backup (`.orbit/backup.json`), criada na primeira vez.
+
+    Faz parte da chave do retrato: dois HDs usados em rodízio na mesma letra de
+    unidade não compartilham o retrato (o mais velho não sobrescreve o mais novo).
+    """
+    arq = Path(pasta) / ID_BACKUP_REL
+    try:
+        v = read_json(arq).get("id")
+        if isinstance(v, str) and v:
+            return v
+    except (OrbitDataError, AttributeError):
+        pass
+    novo = uuid4().hex
+    try:
+        arq.parent.mkdir(parents=True, exist_ok=True)
+        write_json_atomic(arq, {"versao_formato": 1, "id": novo})
+    except OSError:
+        return "sem-id"
+    return novo
 
 
 def _vazia(pasta: Path) -> bool:
@@ -140,12 +167,17 @@ class BackupService:
     def backup(self) -> Path | None:
         return Path(self.settings.backup) if self.settings.backup else None
 
-    def engine(self, caminho: Path | None = None) -> SyncEngine:
+    def engine(self, caminho: Path | None = None, sem_retrato: bool = False) -> SyncEngine:
         destino = Path(caminho) if caminho else self.backup
         if destino is None:
             raise OrbitError("Nenhum backup configurado.")
-        par = id_par(self.base, destino)
-        return SyncEngine(self.base, destino, self.identity, Retrato(self.sync_dir / par),
+        par = f"{id_par(self.base, destino)}-{id_do_backup(destino)[:12]}"
+        if sem_retrato:
+            # recuperação: sem retrato toda diferença vira divergência (spec §8)
+            pasta = self.sync_dir / "_temporarios" / uuid4().hex
+        else:
+            pasta = self.sync_dir / par
+        return SyncEngine(self.base, destino, self.identity, Retrato(pasta),
                           self.log, agora=self.agora, registrar=self.registrar,
                           caches=self._caches.setdefault(par, {}))
 
@@ -344,14 +376,18 @@ class BackupService:
     def _ultima_sync(self) -> str | None:
         if self.backup is None:
             return None
-        return Retrato(self.sync_dir / id_par(self.base, self.backup)).ultima_sync()
+        return self.engine().retrato.ultima_sync()
 
     # ---------- recuperação ----------
     def recuperar_juntando(self, caminho: Path, progresso=lambda f, a, t: None,
                            cancelar=lambda: False) -> ResultadoSync:
         if self.analisar_caminho(caminho) != "orbit":
             raise OrbitError("A pasta indicada não é um backup do Orbit.")
-        res = self._sincronizar_com(self.engine(caminho), progresso, cancelar)
+        eng = self.engine(caminho, sem_retrato=True)
+        try:
+            res = self._sincronizar_com(eng, progresso, cancelar)
+        finally:
+            shutil.rmtree(eng.retrato.pasta, ignore_errors=True)  # retrato temporário nosso
         if self.log is not None:
             try:
                 self.log.registrar_acao("recuperacao", {

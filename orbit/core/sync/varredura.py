@@ -23,6 +23,7 @@ VERSAO_RETRATO = 1
 # JSONs do Orbit: a junção é por item, não por arquivo inteiro
 NOMES_JSON = ("cliente.json", "projeto.json", "maquina.json")
 CONFIG_REL = ".orbit/config.json"
+ID_BACKUP_REL = ".orbit/backup.json"  # identidade do backup: nunca é sincronizada
 LOG_REL = ".orbit/log/acoes.log"
 
 
@@ -46,6 +47,8 @@ def excluido(rel: str) -> bool:
     if partes[-1].startswith("~orbit-"):
         return True
     if PASTA_DIVERGENCIAS.casefold() in partes:
+        return True
+    if "/".join(partes) == ID_BACKUP_REL:
         return True
     for i, p in enumerate(partes[:-1]):
         if p == ".orbit" and i + 1 < len(partes) and partes[i + 1] in ("travas", "presenca"):

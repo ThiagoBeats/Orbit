@@ -249,3 +249,32 @@ def test_status_repetido_nao_recalcula_hash(amb, tmp_path, monkeypatch):
     amb.svc.aguardar_espelhamento(10)
     # só o log de ações muda de verdade a cada sincronização
     assert [c for c in chamadas if not str(c).endswith("acoes.log")] == []
+
+
+def test_recuperar_juntando_ignora_o_retrato_do_backup_configurado(amb, tmp_path):
+    from orbit.core.jsonstore import read_json
+    p = amb.projeto()
+    amb.repo.update_dados(p.id, pedido="ORIGINAL")
+    destino = tmp_path / "bk"
+    destino.mkdir()
+    amb.svc.configurar(destino)
+    amb.svc.settings.backup = None             # sem espelhar o dano
+    amb.repo.update_dados(p.id, pedido="DANIFICADO")  # só o lado local mudou (dano)
+    amb.svc.settings.backup = str(destino)
+    res = amb.svc.recuperar_juntando(destino)
+    # sem retrato, a diferença vira divergência em vez de levar o dano para o backup
+    assert any(dv.chave == "pedido" for dv in res.divergencias)
+    assert read_json(next(destino.rglob("projeto.json")))["pedido"] == "ORIGINAL"
+
+
+def test_backup_trocado_no_mesmo_caminho_usa_outro_retrato(amb, tmp_path):
+    destino = tmp_path / "bk"
+    destino.mkdir()
+    amb.projeto()
+    amb.svc.configurar(destino)
+    r1 = amb.svc.engine().retrato.pasta
+    destino.rename(tmp_path / "hd1")
+    destino.mkdir()  # outro HD no mesmo caminho
+    amb.svc.configurar(destino)
+    r2 = amb.svc.engine().retrato.pasta
+    assert r1 != r2
