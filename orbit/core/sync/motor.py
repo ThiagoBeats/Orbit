@@ -31,6 +31,7 @@ from orbit.core.config import SharedConfig
 from orbit.core.errors import ArquivoEmUso, LockHeld, OrbitDataError, OrbitError
 from orbit.core.identity import Identity
 from orbit.core.jsonstore import read_json, write_json_atomic
+from orbit.core.meudia import _travar_com_espera, mesclar_por_id
 from orbit.core.presence import MAX_IDADE_TRAVA_S, PresenceService
 from orbit.core.repository import (ARQ_CLIENTE, ARQ_MAQUINA, ARQ_PROJETO, PASTA_CLIENTES,
                                    PASTA_MAQUINAS, Repository)
@@ -41,6 +42,16 @@ from orbit.core.sync.varredura import (CONFIG_REL, LOG_REL, PASTA_DIVERGENCIAS, 
                                        Retrato, eh_json_orbit, varrer)
 
 TRAVA_SYNC = "_sincronizacao"
+LISTAS_POR_ID = ("notas", "itens", "lembretes")
+
+
+def _unido_por_id(rel: str) -> bool:
+    """anotacoes.json (pasta de projeto) e .orbit/usuarios/<x>/meu_dia.json."""
+    partes = rel.casefold().split("/")
+    if partes[-1] == "anotacoes.json":
+        return True
+    return (len(partes) == 4 and partes[0] == ".orbit" and partes[1] == "usuarios"
+            and partes[3] == "meu_dia.json")
 RENOVAR_TRAVA_S = 60  # a trava de sincronização é renovada enquanto a rodada dura
 TRAVA_CONTAINER = "_container"
 
@@ -843,6 +854,8 @@ class _Execucao:
                 if il is not None and ib is not None:
                     if il.hash == ib.hash:
                         continue
+                    if _unido_por_id(rel) and self._juntar_por_id(rel, rb):
+                        continue  # anotações / Meu dia: juntados item a item, sem popup
                     if anterior is not None and il.hash == anterior.hash:
                         self._trocar(rel, rb, para_backup=False)
                     elif anterior is not None and ib.hash == anterior.hash:
@@ -865,6 +878,45 @@ class _Execucao:
             except OSError as e:
                 self._checar_backup(e)
                 self._pular(rel, str(e))
+
+    def _juntar_por_id(self, rel_l: str, rel_b: str) -> bool:
+        """Junta as listas por id e grava nos dois lados. False = ilegível (segue o normal)."""
+        arq_l, arq_b = self.L.caminho(rel_l), self.B.caminho(rel_b)
+        pasta = rel_l.rsplit("/", 1)[0] if "/" in rel_l else ""
+        cid = next((i for i, (r, _) in self.L.containers.items() if r == pasta), None)
+        with ExitStack() as pilha:
+            if self.aplicar and cid is not None:  # anotacoes.json: mesma trava do projeto
+                pilha.enter_context(self.repo_l.trava_container(cid))
+                pilha.enter_context(self.repo_b.trava_container(cid))
+            elif self.aplicar and rel_l.casefold().endswith("/meu_dia.json"):
+                # meu_dia.json: a mesma trava pessoal usada pelo Orbit ao gravar
+                svc = PresenceService(self.eng.identity, agora=datetime.now)
+                for arq in (arq_l, arq_b):
+                    trava = _travar_com_espera(svc, arq.parent, "_meu_dia")
+                    pilha.callback(svc.liberar_varios, [trava])
+            try:
+                jl, jb = read_json(arq_l), read_json(arq_b)
+            except OrbitDataError:
+                return False
+            junto = copy.deepcopy(jl)
+            for chave in LISTAS_POR_ID:
+                if chave in jl or chave in jb:
+                    la, lb = jl.get(chave) or [], jb.get(chave) or []
+                    if not isinstance(la, list) or not isinstance(lb, list):
+                        return False
+                    junto[chave] = mesclar_por_id(la, lb)
+            for arq, atual, para_backup in ((arq_l, jl, False), (arq_b, jb, True)):
+                if atual == junto:
+                    continue
+                if self.aplicar:
+                    _escrever_json(arq, junto)
+                    if para_backup:
+                        self.res.enviados += 1
+                    else:
+                        self.res.recebidos += 1
+                else:
+                    (self.comp.enviar if para_backup else self.comp.receber).append(rel_l)
+        return True
 
     def _trocar(self, rel_l: str, rel_b: str, para_backup: bool):
         """Um lado só mudou: guarda o antigo em _Divergências e copia o novo."""

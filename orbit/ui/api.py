@@ -18,6 +18,8 @@ from datetime import date, datetime
 from pathlib import Path
 
 from orbit.core.actionlog import ActionLog
+from orbit.core.anexos import (PASTA_ANEXOS, adicionar_anexos, caminho_anexo,
+                               listar_anexos)
 from orbit.core.config import (TEMAS, add_tipo, load_shared_config, load_user_settings,
                                save_shared_config, save_user_settings, user_settings_path)
 from orbit.core.connection import pasta_existe, testar_pasta
@@ -33,6 +35,7 @@ from orbit.core.reconcile import find_untracked, register_untracked
 from orbit.core.repository import Repository
 from orbit.core.revisions import RevisionService
 from orbit.ui.api_backup import BackupApiMixin
+from orbit.ui.api_meudia import MeuDiaApiMixin
 from orbit.ui.fileserver import FileServer
 
 _DIALOGO_ARQUIVO = 10  # webview.FileDialog.OPEN (pywebview 6.x)
@@ -79,7 +82,7 @@ def caminho_log_padrao() -> Path:
     return Path(os.environ["APPDATA"]) / "Orbit" / "orbit.log"
 
 
-class Api(BackupApiMixin):
+class Api(BackupApiMixin, MeuDiaApiMixin):
     def __init__(self, settings_path: Path | None = None, log_path: Path | None = None,
                  outlook=None, timeout_conexao: float = 5.0, ancoras_path: Path | None = None):
         self._timeout_conexao = timeout_conexao
@@ -90,6 +93,7 @@ class Api(BackupApiMixin):
         self._sync_dir = pasta_prefs / "sync"  # retratos da sincronização (fora da pasta base)
         self._log: ActionLog | None = None
         self._iniciar_estado_backup()
+        self._iniciar_estado_meudia()
         self._outlook = outlook if outlook is not None else OutlookClient()
         self._settings_path = settings_path
         self._log_path = log_path
@@ -120,6 +124,7 @@ class Api(BackupApiMixin):
     def definir_janela(self, janela) -> None:
         """Chamado pelo app.py depois de criar a janela (necessário para diálogos)."""
         self._janela = janela
+        self._reiniciar_agenda()  # lembretes só avisam com a janela pronta
 
     # O pywebview pula atributos com _serializable = False ao montar a API do JS.
     definir_janela._serializable = False
@@ -166,6 +171,7 @@ class Api(BackupApiMixin):
         self._base, self._config, self._fileserver = base, config, fileserver
         self._repo, self._log = repo, log
         self._backup = self._criar_backup_service(base, ident, log, repo)
+        self._criar_meudia(repo, ident, log)
         if antigo is not None:
             antigo.stop()
         self._erro_base = None
@@ -629,6 +635,10 @@ class Api(BackupApiMixin):
         except Exception as e:  # nunca impede o fechamento
             self._registrar_erro(e)
         try:
+            self._parar_agenda()
+        except Exception as e:
+            self._registrar_erro(e)
+        try:
             self._job_cancelar.set()
             self._aguardar_job(10)
             if self._backup is not None:
@@ -813,6 +823,57 @@ class Api(BackupApiMixin):
 
     def _abrir_no_programa(self, container_id, tipo_id, numero, nome):
         _abrir_no_windows(self._arquivo_da_revisao(container_id, tipo_id, numero, nome))
+        return None
+
+    # --- anexos (sem versionamento) ----------------------------------------
+
+    def listar_anexos(self, container_id) -> dict:
+        return self._chamar(self._listar_anexos, container_id)
+
+    def _listar_anexos(self, container_id):
+        if not isinstance(container_id, str):
+            raise OrbitError("Projeto inválido.")
+        return listar_anexos(self._exigir_repo(), container_id)
+
+    def adicionar_anexos(self, container_id, caminhos=None) -> dict:
+        return self._chamar(self._adicionar_anexos, container_id, caminhos)
+
+    def _adicionar_anexos(self, container_id, caminhos):
+        if not isinstance(container_id, str):
+            raise OrbitError("Projeto inválido.")
+        repo = self._exigir_repo()
+        repo.load_container(container_id)  # projeto existe antes de abrir o diálogo
+        if caminhos is None:
+            caminhos = self._escolher_arquivos(True)
+            if not caminhos:
+                return []  # cancelado
+        if not isinstance(caminhos, list) or not all(isinstance(c, str) for c in caminhos):
+            raise OrbitError("Lista de arquivos inválida.")
+        with self._trava_escrita:
+            nomes = adicionar_anexos(repo, container_id, caminhos)
+        self._logar("anexos_adicionados", {"container_id": container_id, "arquivos": nomes})
+        repo._avisar("container", container_id)  # vai para o backup como os documentos
+        return nomes
+
+    def abrir_anexo(self, container_id, nome) -> dict:
+        return self._chamar(self._abrir_anexo, container_id, nome)
+
+    def _abrir_anexo(self, container_id, nome):
+        if not isinstance(container_id, str):
+            raise OrbitError("Projeto inválido.")
+        os.startfile(str(caminho_anexo(self._exigir_repo(), container_id, nome)))
+        return None
+
+    def abrir_pasta_anexos(self, container_id) -> dict:
+        return self._chamar(self._abrir_pasta_anexos, container_id)
+
+    def _abrir_pasta_anexos(self, container_id):
+        if not isinstance(container_id, str):
+            raise OrbitError("Projeto inválido.")
+        repo = self._exigir_repo()
+        pasta = repo.container_path(repo.load_container(container_id)) / PASTA_ANEXOS
+        pasta.mkdir(exist_ok=True)
+        os.startfile(str(pasta))
         return None
 
     def abrir_pasta(self, container_id, tipo_id, numero=None) -> dict:

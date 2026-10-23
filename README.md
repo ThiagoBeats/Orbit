@@ -31,6 +31,7 @@ Tudo continua em pastas e arquivos comuns. Qualquer pessoa entende a organizaç�
   - Contador de documentos emitidos.
 - **Máquinas padrão.** Documentação geral única para máquinas de catálogo, sem vínculo com cliente.
 - **E-mail.** O Orbit monta o e-mail com os anexos pelo Outlook clássico. Sem ele, abre um rascunho `.eml` no programa de e-mail padrão. Todo envio fica registrado na tela **Envios**.
+- **Anexos sem revisão.** Manuais de componentes, notas fiscais e informativos ficam na pasta `Anexos` do projeto ou da máquina, com o nome original, sem renomear e sem controle de revisão.
 - **Importação.** Traz documentos de projetos antigos, inclusive várias revisões de uma vez, sem alterar os originais.
 - **Arquivos colocados à mão.** O Orbit detecta arquivos copiados direto na pasta e permite registrá-los.
 - **Pronto para rede.**
@@ -38,6 +39,12 @@ Tudo continua em pastas e arquivos comuns. Qualquer pessoa entende a organizaç�
   - Trava de upload por documento e trava de gravação por projeto.
   - Teste de conexão com a pasta base.
 - **Configurações.** Tipos de documento e status editáveis, tema escuro e claro e logo da empresa no cabeçalho.
+- **Início (Meu dia).** A tela inicial mostra:
+  - a lista do dia, com OK;
+  - as anotações de projeto (insight, onde parei, pesquisar depois, definição futura);
+  - onde você parou em cada projeto e as ideias para replicar;
+  - os lembretes.
+- **Lembretes** com data e hora, recorrentes ou não. Aparecem como notificação do Windows (com Adiar e Concluir), mesmo com o Orbit minimizado.
 - **Backup e sincronização.** Cópia automática de cada alteração para uma pasta de backup (servidor, HD externo ou nuvem). Um indicador mostra se o backup está em dia, e o botão **Sincronizar** junta as alterações dos dois lados.
 - **Log de ações.** Registro de tudo o que é feito pelo Orbit, com alerta se o arquivo do log for alterado por fora.
 - **Recuperação.** Junta um backup com a pasta base atual ou monta tudo do zero num computador novo.
@@ -79,6 +86,33 @@ A lista pode ser alterada em **Configurações**.
 | Máquina padrão | `<Tipo> - <Máquina> - <DDMMAA> - Rev<NN>.<ext>` |
 
 As preferências pessoais (pasta base e tema) ficam em `%APPDATA%\Orbit\settings.json`. Erros inesperados são registrados em `%APPDATA%\Orbit\orbit.log`.
+
+## Meu dia, anotações e lembretes
+
+A tela **Início** é o painel do dia:
+
+- **Meu dia:** digite e aperte Enter. Escolha o tipo e, se quiser, o projeto.
+  - As atividades ganham uma caixinha de OK.
+  - O que não foi terminado passa sozinho para o dia seguinte.
+  - "Pesquisar depois" e "definição futura" ficam na lista até receberem OK.
+- **Anotações de projeto:** insight, onde parei, pesquisar depois e definição futura.
+  - Também podem ser feitas dentro do painel do projeto.
+  - Ficam visíveis para quem abrir o projeto, com o nome do autor.
+  - As atividades são sempre só suas.
+- **Onde parei:** a sua última anotação desse tipo em cada projeto. O painel do projeto mostra a mais recente no topo.
+- **Ideias para replicar:** os insights de todos os projetos.
+- **Lembretes:** data, hora e repetição (todo dia, dias úteis, dias da semana ou todo mês).
+  - O aviso aparece como notificação do Windows, com os botões *Adiar 10 min*, *Adiar 1 h* e *Concluir*, e também dentro do Orbit.
+  - Um lembrete que venceu com o Orbit fechado aparece em "Lembretes perdidos" na próxima abertura.
+
+**Onde ficam guardados:**
+
+| O quê | Arquivo |
+| :--- | :--- |
+| Seus itens e lembretes | `<pasta base>\.orbit\usuarios\<usuário>\meu_dia.json` |
+| Anotações de projeto | `anotacoes.json`, na pasta do projeto |
+
+Os dois são juntados item a item na sincronização entre casa e empresa.
 
 ## Backup e sincronização
 
@@ -174,5 +208,6 @@ docs/superpowers/       documento de design e plano de implementação
 - **Acesso pelo Explorer:** o aviso de "outra pessoa no projeto" só enxerga quem está usando o Orbit, não quem abre a pasta pelo Explorer.
 - **Uso em rede:** para várias pessoas na mesma pasta de rede, mantenha os relógios dos computadores sincronizados. As travas usam o horário de cada máquina.
 - **Backup em pasta de nuvem** (OneDrive, Dropbox…): funciona bem para uma máquina. Com várias máquinas sincronizando pela mesma pasta de nuvem, prefira o servidor da empresa.
+- **Lembretes:** só avisam com o Orbit aberto (minimizado também vale).
 - **Verificação do backup:** a comparação automática só roda com o Orbit aberto.
 - **Renomeações:** renomear um cliente, projeto ou tipo muda apenas os nomes exibidos e os arquivos novos. Pastas e arquivos existentes não são renomeados.
