@@ -1,0 +1,150 @@
+from datetime import date, datetime, timedelta
+
+import pytest
+
+from orbit.core.actionlog import ActionLog
+from orbit.core.config import load_shared_config
+from orbit.core.errors import OrbitDataError, OrbitError
+from orbit.core.identity import Identity
+from orbit.core.jsonstore import read_json
+from orbit.core.meudia import MeuDiaService, mesclar_por_id
+from orbit.core.repository import Repository
+
+EU = Identity("thiago", "PC1")
+COLEGA = Identity("ana", "PC2")
+
+
+class Relogio:
+    def __init__(self, t=datetime(2026, 10, 23, 9, 0, 0)):
+        self.t = t
+
+    def __call__(self):
+        self.t += timedelta(seconds=1)
+        return self.t
+
+
+@pytest.fixture
+def amb(tmp_path):
+    base = tmp_path / "base"
+    base.mkdir()
+    relogio = Relogio()
+    log = ActionLog(base, EU, tmp_path / "anc.json", agora=relogio)
+    repo = Repository(base, EU, load_shared_config(base), agora=relogio)
+    cli = repo.create_cliente("Cliente X")
+    p = repo.create_projeto(cli.id, "001", "Envasadora")
+    svc = MeuDiaService(repo, EU, agora=relogio, log=log)
+    return svc, repo, p, log, relogio, base
+
+
+def _colega(amb):
+    svc, repo, p, log, relogio, base = amb
+    r2 = Repository(base, COLEGA, load_shared_config(base), agora=relogio)
+    return MeuDiaService(r2, COLEGA, agora=relogio)
+
+
+def test_atividade_com_projeto_fica_no_arquivo_pessoal(amb):
+    svc, repo, p, *_ = amb
+    it = svc.adicionar("Revisar intertravamento", "atividade", p.id)
+    assert it.container_id == p.id and it.usuario == "thiago"
+    assert [i.id for i in svc.itens_pessoais()] == [it.id]
+    assert svc.anotacoes(p.id) == []
+    assert svc.caminho_pessoal.parent.name == "thiago"
+
+
+def test_pesquisar_com_projeto_vai_para_anotacoes_do_projeto(amb):
+    svc, repo, p, *_ = amb
+    it = svc.adicionar("STO no CFW500?", "pesquisar", p.id)
+    assert [i.id for i in svc.anotacoes(p.id)] == [it.id]
+    assert svc.itens_pessoais() == []
+    arq = repo.container_path(repo.load_container(p.id)) / "anotacoes.json"
+    assert read_json(arq)["notas"][0]["texto"] == "STO no CFW500?"
+
+
+def test_item_sem_projeto_e_pessoal(amb):
+    svc, *_ = amb
+    it = svc.adicionar("Ideia geral", "insight")
+    assert [i.id for i in svc.itens_pessoais()] == [it.id]
+
+
+def test_mudar_projeto_move_o_item(amb):
+    svc, repo, p, *_ = amb
+    it = svc.adicionar("Nota", "pesquisar")
+    movido = svc.editar(it.id, container_id=p.id)
+    assert movido.id == it.id and movido.container_id == p.id
+    assert svc.itens_pessoais() == []
+    assert [i.id for i in svc.anotacoes(p.id)] == [it.id]
+    bruto = read_json(svc.caminho_pessoal)["itens"]
+    assert bruto[0]["id"] == it.id and bruto[0]["excluido"] is True
+
+
+def test_ok_so_nos_tipos_que_tem_ok(amb):
+    svc, repo, p, *_ = amb
+    a = svc.adicionar("Fazer", "atividade")
+    assert svc.marcar_feito(a.id, True).feito_em is not None
+    assert svc.marcar_feito(a.id, False).feito_em is None
+    i = svc.adicionar("Insight", "insight", p.id)
+    with pytest.raises(OrbitError):
+        svc.marcar_feito(i.id, True)
+
+
+def test_excluir_esconde_sem_apagar(amb):
+    svc, *_ = amb
+    a = svc.adicionar("Fazer", "atividade")
+    svc.excluir(a.id)
+    assert svc.itens_pessoais() == []
+    assert read_json(svc.caminho_pessoal)["itens"][0]["excluido"] is True
+
+
+def test_validacoes(amb):
+    svc, *_ = amb
+    with pytest.raises(OrbitError):
+        svc.adicionar("   ", "atividade")
+    with pytest.raises(OrbitError):
+        svc.adicionar("x", "kanban")
+    with pytest.raises(OrbitError):
+        svc.adicionar("x", "pesquisar", "nao-existe")
+
+
+def test_mesclar_por_id_vence_o_mais_recente():
+    a = [{"id": "1", "texto": "casa", "alterado_em": "2026-10-23T20:00:00", "criado_em": "1"},
+         {"id": "2", "texto": "só local", "alterado_em": "2026-10-23T08:00:00", "criado_em": "2"}]
+    b = [{"id": "1", "texto": "empresa", "alterado_em": "2026-10-23T09:00:00", "criado_em": "1"},
+         {"id": "3", "texto": "só backup", "alterado_em": "2026-10-23T08:00:00", "criado_em": "3"}]
+    junto = mesclar_por_id(a, b)
+    assert [(d["id"], d["texto"]) for d in junto] == [("1", "casa"), ("2", "só local"),
+                                                      ("3", "só backup")]
+    empate = mesclar_por_id([{"id": "1", "texto": "L", "alterado_em": "x"}],
+                            [{"id": "1", "texto": "B", "alterado_em": "x"}])
+    assert empate[0]["texto"] == "L"
+
+
+def test_json_corrompido_nao_e_regravado(amb):
+    svc, *_ = amb
+    svc.caminho_pessoal.parent.mkdir(parents=True, exist_ok=True)
+    svc.caminho_pessoal.write_text("{quebrado", encoding="utf-8")
+    with pytest.raises(OrbitDataError):
+        svc.adicionar("x", "atividade")
+    with pytest.raises(OrbitDataError):
+        svc.itens_pessoais()
+    assert svc.caminho_pessoal.read_text(encoding="utf-8") == "{quebrado"
+
+
+def test_log_so_para_anotacao_de_projeto(amb):
+    svc, repo, p, log, *_ = amb
+    antes = len(log.ler())
+    a = svc.adicionar("Pessoal", "atividade", p.id)
+    svc.marcar_feito(a.id, True)
+    n = svc.adicionar("Pesquisar X", "pesquisar", p.id)
+    svc.marcar_feito(n.id, True)
+    svc.excluir(n.id)
+    acoes = [l.acao for l in log.ler()][antes:]
+    assert acoes == ["anotacao_criada", "anotacao_concluida", "anotacao_excluida"]
+
+
+def test_anotacao_de_colega_e_visivel_e_atividade_nao(amb):
+    svc, repo, p, *_ = amb
+    outro = _colega(amb)
+    outro.adicionar("Atividade da Ana", "atividade", p.id)
+    outro.adicionar("Definir IHM", "definicao", p.id)
+    assert [i.texto for i in svc.anotacoes(p.id)] == ["Definir IHM"]
+    assert svc.itens_pessoais() == []
