@@ -152,3 +152,44 @@ def test_nada_apagado_apos_resolver(amb):
     resolver(amb.engine(), [x for x in res.divergencias if x.tipo == "revisao"][0].id, "backup")
     for lado in (amb.base, amb.backup):
         assert antes[lado] <= _hashes(lado)
+
+
+def test_resolver_revisao_pode_ser_repetida_apos_falha(amb, monkeypatch):
+    from orbit.core.sync import resolver as mod
+    p, res = _rev_divergente(amb)
+    [d] = [x for x in res.divergencias if x.tipo == "revisao"]
+    original = mod.copiar_seguro
+    falhas = []
+
+    def falha_uma_vez(origem, destino):
+        if not falhas:
+            falhas.append(1)
+            raise PermissionError(13, "arquivo em uso")
+        return original(origem, destino)
+    monkeypatch.setattr(mod, "copiar_seguro", falha_uma_vez)
+    with pytest.raises(OSError):
+        resolver(amb.engine(), d.id, "local")
+    resolver(amb.engine(), d.id, "local")  # tenta de novo
+    assert amb.engine().comparar().identico
+
+
+def test_juntar_cliente_pode_ser_repetido_apos_falha(amb, monkeypatch):
+    from orbit.core.sync import resolver as mod
+    _, cli_l, p_l = _projeto(amb)
+    rb, cli_b, p_b = _projeto(amb, "backup", PC2, nome="Outro")
+    res = amb.engine().sincronizar()
+    [d] = [x for x in res.divergencias if x.tipo == "pasta_id" and x.chave == "cliente"]
+    original = mod.write_json_atomic
+    falhas = []
+
+    def falha_no_projeto(caminho, dados):
+        if str(caminho).endswith("projeto.json") and not falhas:
+            falhas.append(1)
+            raise OSError("rede caiu")
+        return original(caminho, dados)
+    monkeypatch.setattr(mod, "write_json_atomic", falha_no_projeto)
+    with pytest.raises(OSError):
+        resolver(amb.engine(), d.id, "juntar")
+    resolver(amb.engine(), d.id, "juntar")
+    j = read_json(amb.backup / "Clientes/Cliente X/001 - Outro/projeto.json")
+    assert j["cliente_id"] == cli_l.id

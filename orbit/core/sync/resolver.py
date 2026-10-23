@@ -241,6 +241,17 @@ def _arquivo(ctx: _Ctx, div: Divergencia, escolha: str):
 
 
 # ---------- pasta com ids diferentes ----------
+def _reapontar_projetos(ctx: _Ctx, id_antigo: str, id_novo: str) -> None:
+    """Projetos do backup que apontavam para o cliente substituído passam ao id novo."""
+    for cid, (crel, cnome) in ctx.B.containers.items():
+        arq = ctx.B.caminho(f"{crel}/{cnome}")
+        with ctx.repo_b.trava_container(cid):
+            d = read_json(arq)
+            if d.get("cliente_id") == id_antigo:
+                d["cliente_id"] = id_novo
+                write_json_atomic(arq, d)
+
+
 def _livre(lado: _Lado, rel: str) -> str:
     n = 2
     while lado.caminho(f"{rel} ({n})").exists():
@@ -276,6 +287,11 @@ def _pasta_id(ctx: _Ctx, div: Divergencia, escolha: str):
     eh_cliente = div.chave == "cliente"
     indice_l = ctx.L.clientes if eh_cliente else ctx.L.containers
     indice_b = ctx.B.clientes if eh_cliente else ctx.B.containers
+    if eh_cliente and escolha == "juntar" and id_l in indice_b:
+        # nova tentativa depois de uma falha no meio: o cliente já foi juntado,
+        # falta (talvez) reapontar os projetos do backup
+        _reapontar_projetos(ctx, id_b, id_l)
+        return
     if id_l in indice_b or id_b in indice_l:
         return  # já resolvida por outra ação (ex.: o cliente inteiro foi copiado)
     if escolha == "ambos":
@@ -293,13 +309,7 @@ def _pasta_id(ctx: _Ctx, div: Divergencia, escolha: str):
         write_json_atomic(arq_l, junto)
         guardar_em_divergencias(ctx.B.raiz, f"{rel}/{nome_json}", ctx.carimbo)
         write_json_atomic(arq_b, para_b)
-        for cid, (crel, cnome) in ctx.B.containers.items():
-            arq = ctx.B.caminho(f"{crel}/{cnome}")
-            with ctx.repo_b.trava_container(cid):
-                d = read_json(arq)
-                if d.get("cliente_id") == id_b:
-                    d["cliente_id"] = id_l
-                    write_json_atomic(arq, d)
+        _reapontar_projetos(ctx, id_b, id_l)
         return
     arq_l, arq_b = ctx.L.caminho(f"{rel}/{nome_json}"), ctx.B.caminho(f"{rel}/{nome_json}")
     with ExitStack() as pilha:

@@ -342,6 +342,9 @@ class _Execucao:
                 return pl + rel_b[len(pb):]
         return rel_b
 
+    def _ja_tem_pasta_id(self, caminho: str) -> bool:
+        return any(d.tipo == "pasta_id" and d.caminho == caminho for d in self.res.divergencias)
+
     def _pular(self, nome: str, motivo: str, pasta_l: str | None = None):
         self.res.pulados.append(f"{nome}: {motivo}")
         if pasta_l:
@@ -440,6 +443,8 @@ class _Execucao:
                     if alvo.exists():
                         outro = destino._id(alvo)
                         self.clientes_bloqueados.add(cid)
+                        if self._ja_tem_pasta_id(f"{rel}/{ARQ_CLIENTE}"):
+                            continue  # o mesmo conflito, visto do outro lado
                         self.res.divergencias.append(Divergencia(
                             uuid4().hex, "pasta_id", cid, f"{rel}/{ARQ_CLIENTE}", "cliente",
                             f"Existem dois clientes diferentes na pasta \"{rel}\".",
@@ -538,6 +543,9 @@ class _Execucao:
         cli = dados.get("cliente_id")
         if alvo_json.exists():
             outro = destino._id(alvo_json)
+            if self._ja_tem_pasta_id(f"{rel}/{nome_json}"):
+                self.bloqueados_l.append(rel)
+                return  # o mesmo conflito, visto do outro lado
             self.res.divergencias.append(Divergencia(
                 uuid4().hex, "pasta_id", cid, f"{rel}/{nome_json}", "container",
                 f"Existem dois projetos ou máquinas diferentes na pasta \"{rel}\".",
