@@ -375,8 +375,17 @@ class MeuDiaService:
     # ---------- lembretes (guardados no arquivo pessoal) ----------
     def lembretes(self) -> list:
         from orbit.core.lembretes import Lembrete
-        return [Lembrete.from_dict(d) for d in self._dados_pessoais()["lembretes"]
-                if not d.get("excluido")]
+        out = []
+        for d in self._dados_pessoais()["lembretes"]:
+            if not isinstance(d, dict) or d.get("excluido"):
+                continue
+            try:
+                lem = Lembrete.from_dict(d)
+                lem.efetivo  # data ilegível: ignora só este lembrete, não todos
+            except (KeyError, TypeError, ValueError, OrbitError):
+                continue
+            out.append(lem)
+        return out
 
     def salvar_lembrete(self, dados: dict):
         from orbit.core.lembretes import Lembrete, alinhar_inicio, ler_data, validar_recorrencia

@@ -111,3 +111,19 @@ def test_iniciar_e_parar(tmp_path):
     ag.iniciar()
     ag.parar()
     assert not ag.rodando
+
+
+def test_lembrete_com_data_ruim_nao_para_os_outros(tmp_path):
+    from orbit.core.jsonstore import read_json, write_json_atomic
+    svc, t, relogio = _amb(tmp_path, datetime(2026, 10, 23, 8, 0))
+    svc.salvar_lembrete({"texto": "Bom", "quando": "2026-10-23T08:30"})
+    d = read_json(svc.caminho_pessoal)
+    d["lembretes"].append({"id": "ruim", "texto": "Ruim", "quando": "lixo"})
+    d["lembretes"].append({"texto": "sem id"})
+    write_json_atomic(svc.caminho_pessoal, d)
+    falso = Falso()
+    ag = AgendaLembretes(svc, [falso], agora=relogio)
+    ag.verificar_agora()
+    t[0] = datetime(2026, 10, 23, 8, 31)
+    ag.verificar_agora()
+    assert [x[0].texto for x in falso.mostrados] == ["Bom"]

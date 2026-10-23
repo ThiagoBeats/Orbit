@@ -123,3 +123,15 @@ def test_lembrete_vencido_avisa_a_janela(amb):
     chamadas = [j for j in janela.js if j.startswith("orbitLembrete(")]
     assert len(chamadas) == 1
     assert json.loads(chamadas[0][len("orbitLembrete("):-1])["texto"] == "Agora"
+
+
+def test_dashboard_com_lembrete_de_data_ruim(amb):
+    from orbit.core.jsonstore import read_json, write_json_atomic
+    a, pid, base = amb
+    _ok(a.salvar_lembrete({"texto": "Bom", "quando": "2030-01-01T09:00"}))
+    arq = a._meudia.caminho_pessoal
+    d = read_json(arq)
+    d["lembretes"].append({"id": "ruim", "texto": "Ruim", "quando": "lixo"})
+    write_json_atomic(arq, d)
+    dash = _ok(a.dashboard())
+    assert [l["texto"] for l in dash["lembretes"]] == ["Bom"]
