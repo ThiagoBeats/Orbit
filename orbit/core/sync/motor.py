@@ -34,8 +34,8 @@ from orbit.core.presence import MAX_IDADE_TRAVA_S, PresenceService
 from orbit.core.repository import (ARQ_CLIENTE, ARQ_MAQUINA, ARQ_PROJETO, PASTA_CLIENTES,
                                    PASTA_MAQUINAS, Repository)
 from orbit.core.revisions import _recusar_copia
-from orbit.core.sync.mesclar import (Divergencia, mesclar_cliente, mesclar_config,
-                                     mesclar_container)
+from orbit.core.sync.mesclar import (Divergencia, definir_campo, mesclar_cliente,
+                                     mesclar_config, mesclar_container)
 from orbit.core.sync.varredura import (CONFIG_REL, LOG_REL, PASTA_DIVERGENCIAS, InfoArquivo,
                                        Retrato, eh_json_orbit, varrer)
 
@@ -166,6 +166,24 @@ class _Lado:
 
     def caminho(self, rel: str) -> Path:
         return self.raiz / rel
+
+
+def _com_valores_do_backup(junto: dict, divs: list[Divergencia], jb: dict) -> dict:
+    """Versão a gravar no backup: o juntado, mas com o valor do próprio backup em cada
+    item ainda em divergência (enquanto não resolvida, nenhum lado perde o seu valor)."""
+    para_b = copy.deepcopy(junto)
+    for d in divs:
+        if d.tipo == "campo":
+            definir_campo(para_b, d.chave, d.backup.get("valor"))
+        elif d.tipo == "revisao":
+            _, tipo, _, n = d.chave.split(".")
+            doc_b = (jb.get("documentos") or {}).get(tipo) or {}
+            rev_b = next((r for r in doc_b.get("revisoes") or [] if r["numero"] == int(n)), None)
+            doc = para_b["documentos"].get(tipo)
+            if rev_b is not None and doc is not None:
+                doc["revisoes"] = [dict(copy.deepcopy(rev_b), arquivada=r.get("arquivada", False))
+                                   if r["numero"] == int(n) else r for r in doc["revisoes"]]
+    return para_b
 
 
 def _escrever_json(caminho: Path, dados) -> None:
@@ -428,7 +446,7 @@ class _Execucao:
         for d in divs:
             d.caminho = caminho_rel
         self.res.divergencias.extend(divs)
-        para_b = copy.deepcopy(junto)
+        para_b = _com_valores_do_backup(junto, divs, jb)
         for c in campos_pasta:
             if c in jb:
                 para_b[c] = jb[c]
@@ -558,7 +576,7 @@ class _Execucao:
                     else:
                         _, origem, destino, para_backup, rel_ref, restaurado = op
                         self._copiar(origem, destino, para_backup, rel_ref, restaurado)
-                para_b = copy.deepcopy(junto)
+                para_b = _com_valores_do_backup(junto, divs, jb)
                 para_b["pasta"] = jb.get("pasta", para_b.get("pasta"))
                 for tipo, d in (jb.get("documentos") or {}).items():
                     if tipo in para_b["documentos"]:

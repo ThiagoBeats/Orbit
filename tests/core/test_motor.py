@@ -302,3 +302,34 @@ def test_revisao_arquivada_de_numero_maior_continua_arquivada(amb):
         pd = lado / "Clientes" / "Cliente X" / "001 - Envasadora" / "Diagrama Elétrico"
         assert (pd / "Antigos" / antiga.name).is_file()
         assert not (pd / antiga.name).exists()
+
+
+def test_divergencia_nao_resolvida_mantem_o_valor_de_cada_lado(amb):
+    r, cli, p = _projeto(amb)
+    amb.engine().sincronizar()
+    r.update_dados(p.id, pedido="PED-LOCAL")
+    amb.repo("backup", PC2).update_dados(p.id, pedido="PED-BACKUP")
+    for _ in range(2):
+        res = amb.engine().sincronizar()
+        assert [d.chave for d in res.divergencias] == ["pedido"]
+    assert read_json(amb.backup / "Clientes/Cliente X/001 - Envasadora/projeto.json")["pedido"] \
+        == "PED-BACKUP"
+    assert read_json(amb.base / "Clientes/Cliente X/001 - Envasadora/projeto.json")["pedido"] \
+        == "PED-LOCAL"
+
+
+def test_revisao_divergente_mantem_os_arquivos_de_cada_lado_no_json(amb):
+    r, cli, p = _projeto(amb)
+    amb.engine().sincronizar()
+    amb.subir(r, p.id)
+    rb = amb.repo("backup", PC2)
+    dwg = amb.origem / "x.dwg"
+    dwg.write_bytes(b"dwg")
+    RevisionService(rb).enviar_revisao(p.id, "diagrama_eletrico", amb.pdf(), [dwg],
+                                       "Em elaboração", "m")
+    for _ in range(2):
+        res = amb.engine().sincronizar()
+        assert [d.tipo for d in res.divergencias] == ["revisao"]
+    jb = read_json(amb.backup / "Clientes/Cliente X/001 - Envasadora/projeto.json")
+    arqs = jb["documentos"]["diagrama_eletrico"]["revisoes"][0]["arquivos"]
+    assert len(arqs) == 2
