@@ -279,3 +279,26 @@ def test_mesma_rev_com_mesmo_nome_e_conteudo_diferente_diverge(amb):
     a = {f.read_bytes() for f in amb.base.rglob("*.pdf")}
     b = {f.read_bytes() for f in amb.backup.rglob("*.pdf")}
     assert a != b and len(a) == len(b) == 1
+
+
+def test_revisao_arquivada_de_numero_maior_continua_arquivada(amb):
+    """Rev05 registrada como antiga (Antigos) e Rev00 atual: sincronizar não troca a atual."""
+    r, cli, p = _projeto(amb)
+    amb.subir(r, p.id)  # Rev00 atual
+    pasta = amb.base / "Clientes" / "Cliente X" / "001 - Envasadora" / "Diagrama Elétrico"
+    antiga = pasta / "Antigos" / "Diagrama Elétrico - Cliente X - Envasadora - 010126 - Rev05.pdf"
+    antiga.write_bytes(b"rev05 antiga")
+    from orbit.core.reconcile import find_untracked, register_untracked
+    c = r.load_container(p.id)
+    register_untracked(r, p.id, find_untracked(r, c), "Aprovado")
+    assert r.load_container(p.id).documentos["diagrama_eletrico"].atual.numero == 0
+    for _ in range(2):
+        res = amb.engine().sincronizar()
+        assert res.erro is None and res.divergencias == []
+    for lado in (amb.base, amb.backup):
+        doc = Repository(lado, PC1, load_shared_config(lado)).load_container(p.id) \
+            .documentos["diagrama_eletrico"]
+        assert doc.atual.numero == 0
+        pd = lado / "Clientes" / "Cliente X" / "001 - Envasadora" / "Diagrama Elétrico"
+        assert (pd / "Antigos" / antiga.name).is_file()
+        assert not (pd / antiga.name).exists()

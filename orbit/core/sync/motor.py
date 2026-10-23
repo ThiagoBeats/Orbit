@@ -649,6 +649,8 @@ class _Execucao:
                             (self.B, onde_b, cb[i], self.L, onde_l, True)):
                         if onde == alvo:
                             continue
+                        if onde is not None and onde.endswith(f"/Antigos/{nome}"):
+                            continue  # nunca tira um arquivo de Antigos
                         if onde is not None:
                             ops.append(("mover", lado.caminho(onde), lado.caminho(alvo)))
                         elif outro is not None:

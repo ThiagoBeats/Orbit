@@ -140,9 +140,13 @@ def _mesclar_documento(cid, tipo, base_doc, loc, bak, divs) -> dict:
                         "dois lados.", {"valor": rl.get(campo)}, {"valor": rb.get(campo)},
                         ["local", "backup"]))
         juntas.append(r)
-    maior = max((r["numero"] for r in juntas), default=None)
+    # atual = a maior revisão que não está arquivada em pelo menos um dos lados
+    # (uma revisão antiga registrada com número maior continua antiga)
+    ativas = [n for n in set(revs_l) | set(revs_b)
+              if any(not r.get("arquivada", False) for r in (revs_l.get(n), revs_b.get(n)) if r)]
+    atual = max(ativas, default=None)
     for r in juntas:
-        r["arquivada"] = r["numero"] != maior
+        r["arquivada"] = r["numero"] != atual
     out["revisoes"] = juntas
     return out
 

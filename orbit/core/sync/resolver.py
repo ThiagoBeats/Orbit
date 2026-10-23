@@ -125,7 +125,7 @@ def _rev(doc: dict, n: int) -> dict:
 
 def _ajustar_atuais(ctx: _Ctx, lado: _Lado, rel: str, doc: dict) -> None:
     """Recalcula a revisão atual e leva para Antigos os arquivos das que deixaram de ser."""
-    maior = max((r["numero"] for r in doc["revisoes"]), default=None)
+    maior = max((r["numero"] for r in doc["revisoes"] if not r.get("arquivada")), default=None)
     for r in doc["revisoes"]:
         arquivada = r["numero"] != maior
         if arquivada:
