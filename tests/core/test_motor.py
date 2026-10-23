@@ -445,3 +445,89 @@ def test_trava_de_sincronizacao_e_renovada_durante_a_rodada(amb, monkeypatch):
         time.sleep(0.3)
     assert renovadas
     assert not (amb.backup / ".orbit" / "travas" / "_sincronizacao.lock").exists()
+
+
+# ---------- Meu dia e anotações: junção por id ----------
+
+def _meudia(amb, lado="base", ident=PC1, relogio=None):
+    from orbit.core.meudia import MeuDiaService
+    return MeuDiaService(amb.repo(lado, ident), ident, agora=relogio or datetime.now)
+
+
+def test_anotacoes_dos_dois_lados_sao_unidas(amb):
+    r, cli, p = _projeto(amb)
+    _meudia(amb).adicionar("Nota de casa", "pesquisar", p.id)
+    amb.engine().sincronizar()
+    _meudia(amb).adicionar("Outra de casa", "insight", p.id)
+    _meudia(amb, "backup", PC2).adicionar("Nota do servidor", "definicao", p.id)
+    res = amb.engine().sincronizar()
+    assert res.divergencias == [] and res.erro is None
+    for lado in ("base", "backup"):
+        textos = sorted(i.texto for i in _meudia(amb, lado).anotacoes(p.id))
+        assert textos == ["Nota de casa", "Nota do servidor", "Outra de casa"]
+
+
+def test_mesmo_item_editado_nos_dois_lados_fica_o_mais_recente(amb):
+    from datetime import timedelta
+    r, cli, p = _projeto(amb)
+    t = [datetime(2026, 10, 23, 8, 0, 0)]
+    relogio = lambda: t[0]
+    it = _meudia(amb, relogio=relogio).adicionar("Original", "pesquisar", p.id)
+    amb.engine().sincronizar()
+    t[0] += timedelta(hours=1)
+    _meudia(amb, "backup", PC1, relogio).editar(it.id, texto="Editado na empresa")
+    t[0] += timedelta(hours=8)
+    _meudia(amb, relogio=relogio).editar(it.id, texto="Editado em casa")
+    res = amb.engine().sincronizar()
+    assert res.divergencias == []
+    for lado in ("base", "backup"):
+        notas = _meudia(amb, lado).anotacoes(p.id)
+        assert [n.texto for n in notas] == ["Editado em casa"]
+
+
+def test_meu_dia_unido_sem_divergencia(amb):
+    _projeto(amb)
+    _meudia(amb).adicionar("Atividade em casa", "atividade")
+    amb.engine().sincronizar()
+    _meudia(amb).adicionar("Mais uma em casa", "atividade")
+    _meudia(amb, "backup", PC1).adicionar("Feita na empresa", "atividade")
+    _meudia(amb, "backup", PC1).salvar_lembrete({"texto": "Reunião",
+                                                 "quando": "2026-10-24T09:00"})
+    res = amb.engine().sincronizar()
+    assert res.divergencias == []
+    for lado in ("base", "backup"):
+        svc = _meudia(amb, lado)
+        assert sorted(i.texto for i in svc.itens_pessoais()) == [
+            "Atividade em casa", "Feita na empresa", "Mais uma em casa"]
+        assert [l.texto for l in svc.lembretes()] == ["Reunião"]
+
+
+def test_juncao_do_meu_dia_nao_perde_gravacao_durante_a_sincronizacao(amb, monkeypatch):
+    from orbit.core.sync import motor as mod
+    _projeto(amb)
+    _meudia(amb).adicionar("Antes", "atividade")
+    amb.engine().sincronizar()
+    _meudia(amb).adicionar("Em casa", "atividade")
+    _meudia(amb, "backup", PC1).adicionar("Na empresa", "atividade")
+    original = mod.read_json
+    feito = []
+
+    def le_e_alguem_grava(caminho):
+        dados = original(caminho)
+        if str(caminho).endswith("meu_dia.json") and not feito:
+            feito.append(1)
+            # o lembrete/um clique grava no arquivo local logo depois da leitura da sincronização
+            import threading
+            t = threading.Thread(target=lambda: _meudia(amb).adicionar("No meio", "atividade"))
+            t.start()
+            t.join(0.3)
+            feito.append(t)
+        return dados
+    monkeypatch.setattr(mod, "read_json", le_e_alguem_grava)
+    amb.engine().sincronizar()
+    feito[1].join(10)
+    monkeypatch.setattr(mod, "read_json", original)
+    amb.engine().sincronizar()
+    for lado in ("base", "backup"):
+        textos = sorted(i.texto for i in _meudia(amb, lado).itens_pessoais())
+        assert "No meio" in textos and "Em casa" in textos and "Na empresa" in textos
