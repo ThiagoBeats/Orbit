@@ -416,3 +416,18 @@ def test_pastas_renomeadas_no_backup_recebem_os_arquivos_certos(amb):
     assert (raiz_b / "002 - Rotuladora" / "projeto.json").is_file()
     assert not (amb.backup / "Clientes" / "Cliente X").exists()
     assert not (raiz_b / "001 - Envasadora").exists()
+
+
+def test_espelhar_um_projeto_nao_apaga_divergencias_de_outro(amb):
+    r, cli, p = _projeto(amb)
+    p2 = r.create_projeto(cli.id, "002", "Rotuladora")
+    amb.engine().sincronizar()
+    r.update_dados(p.id, pedido="L")
+    amb.repo("backup", PC2).update_dados(p.id, pedido="B")
+    eng = amb.engine()
+    res = eng.sincronizar()
+    assert len(res.divergencias) == 1
+    r.update_dados(p2.id, pedido="só aqui")
+    eng.sincronizar(somente_container=p2.id)
+    pend = eng.retrato.divergencias_pendentes()
+    assert [d["escopo_id"] for d in pend] == [p.id]

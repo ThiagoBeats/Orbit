@@ -927,7 +927,12 @@ class _Execucao:
         jsons = self._jsons_anteriores()
         jsons.update(self.jsons_novos)
         self.eng.retrato.salvar(arquivos, jsons, self.eng.agora().strftime("%Y-%m-%dT%H:%M:%S"))
-        self.eng.retrato.salvar_divergencias([d.to_dict() for d in self.res.divergencias])
+        novas = [d.to_dict() for d in self.res.divergencias]
+        if self.somente is not None:
+            # rodada de um projeto só: as divergências dos outros continuam pendentes
+            novas = [d for d in self.eng.retrato.divergencias_pendentes()
+                     if d.get("escopo_id") != self.somente] + novas
+        self.eng.retrato.salvar_divergencias(novas)
 
     def _jsons_anteriores(self) -> dict:
         return self.eng.retrato.todos_jsons()
