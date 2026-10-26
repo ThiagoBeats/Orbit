@@ -48,14 +48,19 @@ def _fechar_em(svc: ProducaoService, op_id: str, operador: str, obs: str = "") -
     return None
 
 
+def _validar_alvo(op: dict, tipo: str) -> None:
+    if op["etapa"] not in ETAPAS_COM_APONTAMENTO:
+        raise OrbitError("Esta OP não está na produção (precisa estar liberada e não "
+                         "aprovada/expedida).")
+    if tipo == "trabalho" and op.get("bloqueio"):
+        raise OrbitError(f"OP bloqueada: {op['bloqueio']['motivo']}. Desbloqueie antes de "
+                         "trabalhar nela.")
+
+
 def _abrir(svc: ProducaoService, op_id: str, operador: str, tipo: str, motivo: str | None,
            obs: str) -> dict:
     with svc.editar(op_id) as op:
-        if op["etapa"] not in ETAPAS_COM_APONTAMENTO:
-            raise OrbitError("Esta OP não está na produção (precisa estar liberada e não "
-                             "aprovada/expedida).")
-        if tipo == "trabalho" and op.get("bloqueio"):
-            raise OrbitError(f"OP bloqueada: {op['bloqueio']['motivo']}.")
+        _validar_alvo(op, tipo)
         if op["etapa"] == "liberada" and tipo == "trabalho":
             op["etapa"] = "em_montagem"
             svc.registrar(op, "etapa_avancada", {"para": "em_montagem", "automatico": True},
@@ -69,7 +74,7 @@ def _abrir(svc: ProducaoService, op_id: str, operador: str, tipo: str, motivo: s
 
 def iniciar(svc: ProducaoService, op_id: str, operador: str, obs: str = "") -> dict:
     operador = _operador(operador)
-    svc.carregar(op_id)  # OP existe
+    _validar_alvo(svc.carregar(op_id), "trabalho")  # antes de encerrar o que está aberto
     atual = aberto_do_operador(svc, operador)
     if atual is not None:
         _fechar_em(svc, atual[0], operador)
@@ -83,6 +88,7 @@ def pausar(svc: ProducaoService, operador: str, motivo: str, obs: str = "") -> d
     atual = aberto_do_operador(svc, operador)
     if atual is None or atual[1]["tipo"] != "trabalho":
         raise OrbitError("Não há trabalho em andamento para pausar.")
+    _validar_alvo(svc.carregar(atual[0]), "parada")
     _fechar_em(svc, atual[0], operador)
     return _abrir(svc, atual[0], operador, "parada", motivo, obs)
 
@@ -92,6 +98,7 @@ def retomar(svc: ProducaoService, operador: str) -> dict:
     atual = aberto_do_operador(svc, operador)
     if atual is None or atual[1]["tipo"] != "parada":
         raise OrbitError("Não há parada em andamento para retomar.")
+    _validar_alvo(svc.carregar(atual[0]), "trabalho")
     _fechar_em(svc, atual[0], operador)
     return _abrir(svc, atual[0], operador, "trabalho", None, "")
 
@@ -115,6 +122,12 @@ def editar(svc: ProducaoService, op_id: str, ap_id: str, inicio: str, fim: str |
         raise OrbitError("Data/hora inválida.") from None
     if f is not None and f <= ini:
         raise OrbitError("O fim precisa ser depois do início.")
+    if f is None:
+        dono = next((x.get("operador") for x in svc.carregar(op_id)["apontamentos"]
+                     if x.get("id") == ap_id), None)
+        if any(x.get("fim") is None and x.get("id") != ap_id and x.get("operador") == dono
+               for outra in svc.todas_ops() for x in outra.get("apontamentos") or []):
+            raise OrbitError("Este operador já tem outro apontamento aberto; informe o fim.")
     with svc.editar(op_id) as op:
         ap = next((x for x in op["apontamentos"] if x["id"] == ap_id), None)
         if ap is None:

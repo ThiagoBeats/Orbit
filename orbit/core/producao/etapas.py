@@ -75,6 +75,9 @@ def atualizar_pacote(svc: ProducaoService, op_id: str, tipos: list[str] | None =
         if not op.get("pacote"):
             raise OrbitError("A OP ainda não foi liberada.")
         atuais = _documentos_atuais(svc, op["container_id"])
+        if tipos is not None and (not isinstance(tipos, list)
+                                  or not all(isinstance(t, str) for t in tipos)):
+            raise OrbitError("Lista de documentos inválida.")
         alvo = tipos if tipos is not None else [d["tipo_id"] for d in op["pacote"]]
         trocas = []
         novo = []
@@ -118,8 +121,12 @@ def avancar(svc: ProducaoService, op_id: str, usuario: str | None = None) -> dic
             pend = testes.pendencias(op, svc.config())
             if pend:
                 raise OrbitError("Antes da verificação final: " + "; ".join(pend))
-        if destino == "aprovada" and not op["testes"]["verificacao"].get("aprovada"):
-            raise OrbitError("A verificação final por amostragem ainda não foi aprovada.")
+        if destino == "aprovada":
+            if not op["testes"]["verificacao"].get("aprovada"):
+                raise OrbitError("A verificação final por amostragem ainda não foi aprovada.")
+            pend = testes.pendencias(op, svc.config())
+            if pend:
+                raise OrbitError("Antes de aprovar: " + "; ".join(pend))
         op["etapa"] = destino
         svc.registrar(op, "etapa_avancada", {"para": destino}, usuario)
     return op
@@ -138,8 +145,12 @@ def voltar(svc: ProducaoService, op_id: str, destino: str, motivo: str,
                              f"\"{NOMES_ETAPAS[op['etapa']]}\".")
         de = op["etapa"]
         op["etapa"] = destino
-        if ETAPAS.index(destino) < ETAPAS.index("aprovada"):
-            op["testes"]["verificacao"]["aprovada"] = None
+        if ETAPAS.index(destino) < ETAPAS.index("verificacao_final"):
+            # a amostra sorteada antes do retrabalho não vale mais
+            op["testes"]["verificacao"].update(sorteadas=[], resultados={}, checklist=[],
+                                               verificador=None, concluida=False, aprovada=None)
+        elif ETAPAS.index(destino) < ETAPAS.index("aprovada"):
+            op["testes"]["verificacao"].update(concluida=False, aprovada=None)
         svc.registrar(op, "etapa_voltada", {"de": de, "para": destino, "motivo": motivo}, usuario)
     return op
 

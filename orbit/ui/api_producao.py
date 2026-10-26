@@ -263,7 +263,8 @@ class ProducaoApiMixin:
         if caminho.suffix.lower() not in EXT_PLANILHA:
             raise OrbitError("Use uma planilha .xlsx ou .csv.")
         tab = importar.ler_tabela(caminho)
-        campos, obrig = importar.CAMPOS.get(destino, (None, None))
+        campos, obrig = importar.CAMPOS.get(destino if isinstance(destino, str) else "",
+                                            (None, None))
         if campos is None:
             raise OrbitError("Destino da importação inválido.")
         return {"caminho": str(caminho), "nome": caminho.name, "cabecalho": tab["cabecalho"],
@@ -277,7 +278,7 @@ class ProducaoApiMixin:
                             substituir)
 
     def _prod_importar_planilha(self, op_id, destino, caminho, mapa, substituir):
-        if destino not in importar.CAMPOS or not isinstance(mapa, dict):
+        if not isinstance(destino, str) or destino not in importar.CAMPOS                 or not isinstance(mapa, dict):
             raise OrbitError("Importação inválida.")
         campos, obrig = importar.CAMPOS[destino]
         mapa = {c: mapa.get(c) for c in campos}

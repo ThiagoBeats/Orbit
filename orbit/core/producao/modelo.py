@@ -41,7 +41,7 @@ def testes_vazios() -> dict:
         "ponto_a_ponto": {"linhas": [], "importado_em": None, "anteriores": []},
         "isolacao": {"circuitos": []},
         "energizacao": {"passos": [], "pontos": []},
-        "io": {"sinais": [], "importado_em": None},
+        "io": {"sinais": [], "importado_em": None, "anteriores": []},
         "verificacao": {"sorteadas": [], "verificador": None, "resultados": {},
                         "checklist": [], "concluida": False, "aprovada": None, "historico": []},
     }
@@ -89,7 +89,9 @@ class ProducaoService:
         pasta = self.repo.base / ".orbit"
         pasta.mkdir(parents=True, exist_ok=True)
         svc = self._svc_trava()
-        trava = _travar_com_espera(svc, self.repo.base, "_producao")
+        trava = _travar_com_espera(svc, self.repo.base, "_producao",
+                                   "A configuração da produção está sendo gravada em outro "
+                                   "computador; tente de novo em instantes.")
         try:
             cfg = carregar_config(self.repo.base)
             yield cfg
@@ -200,6 +202,8 @@ class ProducaoService:
         d.setdefault("testes", testes_vazios())
         for k, v in testes_vazios().items():
             d["testes"].setdefault(k, v)
+            for kk, vv in v.items():
+                d["testes"][k].setdefault(kk, vv)
         return d
 
     def _caminho(self, op_id: str) -> Path:
@@ -227,7 +231,9 @@ class ProducaoService:
     def editar(self, op_id: str) -> Iterator[dict]:
         arq = self._caminho(op_id)
         svc = self._svc_trava()
-        trava = _travar_com_espera(svc, arq.parent, "_op")
+        trava = _travar_com_espera(svc, arq.parent, "_op",
+                                   "Esta OP está sendo gravada em outro computador; tente de novo "
+                                   "em instantes.")
         try:
             op = self._ler(arq)  # relida dentro da trava
             yield op

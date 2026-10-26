@@ -96,6 +96,11 @@ def _marcar_origem_ok(op: dict, origem: dict) -> None:
     item = next((x for x in lista or [] if x.get("id") == lid), None)
     if item is None:
         return
+    for medida in ("medido_mohm", "medido_v"):
+        if medida in item and item.get("resultado") == "nc":
+            # medição reprovada: o reteste é uma nova medição (o valor antigo fica na NC)
+            item.update({medida: None, "resultado": None, "por": None, "em": None})
+            return
     for campo in ("resultado", "ligacao", "aperto"):
         if item.get(campo) == "nc":
             item[campo] = "ok"
@@ -116,11 +121,12 @@ def verificar_nc(svc: ProducaoService, op_id: str, nc_id: str, operador: str) ->
 
 def _marca(svc: ProducaoService, op: dict, item: dict, resultado: str, operador: str,
            obs: str, nc_tipo, bloco: str, campo: str = "resultado") -> None:
+    ja_era_nc = item.get(campo) == "nc"
     item[campo] = resultado
     item["obs"] = obs or item.get("obs", "")
     item["por"] = operador
     item["em"] = svc.agora_iso()
-    if resultado == "nc":
+    if resultado == "nc" and not ja_era_nc:
         _nova_nc(svc, op, nc_tipo, obs, {"bloco": bloco, "linha_id": item["id"]}, operador)
 
 
@@ -282,8 +288,11 @@ def carregar_io(svc, op_id, sinais: list[dict], substituir: bool = False) -> int
         io = op["testes"]["io"]
         if any(s["resultado"] for s in io["sinais"]) and not substituir:
             raise OrbitError("O teste de entradas e saídas já começou. Confirme para substituir.")
+        if io["sinais"]:
+            io.setdefault("anteriores", []).append({"em": svc.agora_iso(), "sinais": io["sinais"]})
         io["sinais"] = novos
         io["importado_em"] = svc.agora_iso()
+        svc.registrar(op, "io_carregado", {"sinais": len(novos)})
     return len(novos)
 
 
@@ -347,10 +356,15 @@ def sortear_amostra(svc, op_id, verificador, rnd: random.Random | None = None) -
         if verificador.casefold() in {q.casefold() for q in quem_testou}:
             raise OrbitError("A verificação final precisa ser feita por outra pessoa, diferente "
                              "de quem fez o ponto a ponto.")
-        for o in cfg.get("operadores") or []:
-            if isinstance(o, dict) and str(o.get("nome", "")).casefold() == verificador.casefold()                     and not o.get("verifica"):
-                raise OrbitError(f"{verificador} não está habilitado para a verificação final "
-                                 "(Configurações → Produção).")
+        v_atual = op["testes"]["verificacao"]
+        if v_atual.get("concluida") and v_atual.get("aprovada"):
+            raise OrbitError("A verificação final desta OP já foi aprovada.")
+        operadores = [o for o in cfg.get("operadores") or [] if isinstance(o, dict)]
+        if operadores and not any(
+                str(o.get("nome", "")).casefold() == verificador.casefold() and o.get("verifica")
+                for o in operadores):
+            raise OrbitError(f"{verificador} não está habilitado para a verificação final "
+                             "(Configurações → Produção).")
         n = len(linhas)
         k = min(n, max(int(cfg["amostragem_min"]), math.ceil(n * cfg["amostragem_pct"] / 100)))
         escolhidas = (rnd or random.SystemRandom()).sample([l["id"] for l in linhas], k)
@@ -364,6 +378,10 @@ def sortear_amostra(svc, op_id, verificador, rnd: random.Random | None = None) -
 
 def _verificacao_do(op: dict, verificador: str) -> dict:
     v = op["testes"]["verificacao"]
+    if op["etapa"] != "verificacao_final" or not v.get("sorteadas"):
+        raise OrbitError("A OP precisa estar na etapa \"Verificação final\" com a amostra sorteada.")
+    if v.get("concluida"):
+        raise OrbitError("Esta verificação já foi concluída. Para refazer, sorteie uma nova amostra.")
     if not v.get("verificador") or v["verificador"].casefold() != verificador.casefold():
         raise OrbitError("Sorteie a amostra com o seu nome antes de verificar.")
     return v

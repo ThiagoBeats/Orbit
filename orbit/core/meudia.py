@@ -75,7 +75,8 @@ def mesclar_por_id(a: list[dict], b: list[dict]) -> list[dict]:
     return sorted(por_id.values(), key=lambda d: (str(d.get("criado_em", "")), str(d["id"])))
 
 
-def _travar_com_espera(svc: PresenceService, pasta: Path, nome: str):
+def _travar_com_espera(svc: PresenceService, pasta: Path, nome: str,
+                       mensagem: str | None = None):
     limite = time.monotonic() + _ESPERA_TRAVA_S
     lock = svc.caminho_trava(pasta, nome)
     while True:
@@ -86,8 +87,8 @@ def _travar_com_espera(svc: PresenceService, pasta: Path, nome: str):
                 svc.liberar_abandonada(lock, _MAX_IDADE_TRAVA_S)
                 continue
             if time.monotonic() >= limite:
-                raise OrbitError("Suas anotações estão sendo gravadas em outro computador; "
-                                 "tente de novo em instantes.") from None
+                raise OrbitError(mensagem or "Suas anotações estão sendo gravadas em outro "
+                                 "computador; tente de novo em instantes.") from None
             time.sleep(0.05)
 
 

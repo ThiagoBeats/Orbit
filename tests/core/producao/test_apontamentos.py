@@ -95,3 +95,26 @@ def test_op_planejada_ou_expedida_nao_recebe_apontamento(prod):
     op = svc.criar_op(p.id, {"painel": "X"})
     with pytest.raises(OrbitError):
         A.iniciar(svc, op["id"], "João")
+
+
+def test_retomar_em_op_bloqueada_nao_perde_a_parada(duas_ops, relogio):
+    svc, (a, b) = duas_ops
+    A.iniciar(svc, a, "João")
+    A.pausar(svc, "João", "Falta de material")
+    etapas.bloquear(svc, a, "Falta de material")
+    with pytest.raises(OrbitError):
+        A.retomar(svc, "João")
+    assert A.aberto_do_operador(svc, "João")[1]["tipo"] == "parada"
+    with pytest.raises(OrbitError):
+        A.iniciar(svc, a, "João")
+    assert A.aberto_do_operador(svc, "João")[1]["tipo"] == "parada"
+
+
+def test_editar_nao_reabre_se_ja_tem_outro_aberto(duas_ops, relogio):
+    svc, (a, b) = duas_ops
+    A.iniciar(svc, a, "João")
+    relogio.avancar(hours=1)
+    A.iniciar(svc, b, "João")
+    ap = svc.carregar(a)["apontamentos"][0]
+    with pytest.raises(OrbitError):
+        A.editar(svc, a, ap["id"], ap["inicio"], None, "thiago")

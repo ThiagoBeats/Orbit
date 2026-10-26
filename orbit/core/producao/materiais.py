@@ -77,7 +77,7 @@ def mudar_situacao(svc: ProducaoService, op_id: str, ids: list[str], situacao: s
                    usuario: str, obs: str = "", previsao: str | None = None) -> int:
     if situacao not in SITUACOES:
         raise OrbitError("Situação inválida.")
-    if not isinstance(ids, list) or not ids:
+    if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
         raise OrbitError("Selecione ao menos um item.")
     if previsao:
         try:

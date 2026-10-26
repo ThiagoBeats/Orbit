@@ -414,7 +414,8 @@ Orbit.views.op = async (conteudo, id, aindaAtual) => {
           return;
         }
         dados.resultado = val;
-        if (val === 'nc') {
+        const atual = (seg.querySelector('button.on') || {}).dataset;
+        if (val === 'nc' && !(atual && atual.val === 'nc')) {
           const r = await pedirNc(bloco === 'sinal' ? 'Função/lógica' : null);
           if (!r) return;
           dados.nc_tipo = r.tipo; dados.obs = r.obs;
@@ -502,10 +503,10 @@ Orbit.views.op = async (conteudo, id, aindaAtual) => {
       <div class="linha-botoes"><button type="button" class="btn" id="nc-nova">Abrir NC</button>
         <span class="texto-sec">NC só fecha depois do reteste (qualquer pessoa). NCs dos testes também nascem marcando "NC" na linha.</span></div>
       ${op.ncs.length ? `<div class="bloco sem-pad"><table class="tabela"><tr><th>Nº</th><th>Tipo</th><th>Descrição</th><th>Origem</th><th>Aberta</th><th>Correção</th><th>Situação</th><th></th></tr>
-        ${op.ncs.slice().reverse().map(n => `<tr><td>${n.numero}</td><td>${esc(n.tipo)}</td><td>${esc(n.descricao)}</td><td>${esc(origem(n))}</td>
+        ${op.ncs.slice().reverse().map(n => `<tr><td>${esc(n.numero)}</td><td>${esc(n.tipo)}</td><td>${esc(n.descricao)}</td><td>${esc(origem(n))}</td>
           <td>${esc(n.aberta_por)}<div class="texto-sec">${esc(formatarDataHora(n.aberta_em))}</div></td>
           <td>${esc(n.correcao || '')}${n.corrigida_por ? `<div class="texto-sec">${esc(n.corrigida_por)}</div>` : ''}${n.verificada_por ? `<div class="texto-sec">reteste: ${esc(n.verificada_por)}</div>` : ''}</td>
-          <td><span class="chip ${_SIT_NC[n.situacao][0]}">${_SIT_NC[n.situacao][1]}</span></td>
+          <td><span class="chip ${(_SIT_NC[n.situacao] || [''])[0]}">${esc((_SIT_NC[n.situacao] || ['', n.situacao])[1])}</span></td>
           <td>${n.situacao === 'aberta' ? `<button type="button" class="btn pequeno" data-corrigir="${esc(n.id)}">Registrar correção</button>`
             : n.situacao === 'corrigida' ? `<button type="button" class="btn pequeno solid" data-reteste="${esc(n.id)}">Reteste OK</button>` : ''}</td></tr>`).join('')}</table></div>`
         : '<div class="bloco"><p class="texto-sec">Nenhuma não conformidade.</p></div>'}`;

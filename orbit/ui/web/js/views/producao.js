@@ -57,6 +57,9 @@ function prodLigarSeletor(raiz, aoMudar, id = 'prod-operador') {
       const r = await prodFormulario({ titulo: 'Operador', botao: 'OK',
         campos: [{ id: 'nome', rotulo: 'Nome', obrigatorio: true }] });
       if (r) Prod.operador = r.nome;
+      // redesenha o seletor: o nome novo vira opção e "Outro…" pode ser escolhido de novo
+      sel.closest('label').outerHTML = prodSeletorOperador(id);
+      prodLigarSeletor(raiz, aoMudar, id);
     } else {
       Prod.operador = sel.value;
     }

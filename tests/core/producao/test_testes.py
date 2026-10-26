@@ -199,3 +199,88 @@ def test_operador_sem_habilitacao_nao_verifica(op_em_teste):
     with pytest.raises(OrbitError):
         T.sortear_amostra(svc, op_id, "pedro")
     assert len(T.sortear_amostra(svc, op_id, "Maria")["sorteadas"]) == 10
+
+
+def test_verificacao_velha_nao_aprova_depois_de_voltar(op_em_teste):
+    svc, op_id = op_em_teste
+    _ir_para_verificacao(svc, op_id, 5)
+    am = T.sortear_amostra(svc, op_id, "Maria", rnd=random.Random(1))
+    etapas.voltar(svc, op_id, "em_teste", "retrabalho")
+    assert svc.carregar(op_id)["testes"]["verificacao"]["sorteadas"] == []
+    with pytest.raises(OrbitError):
+        T.marcar_amostra(svc, op_id, am["sorteadas"][0], "ok", "Maria")
+    with pytest.raises(OrbitError):
+        T.concluir_verificacao(svc, op_id, "Maria")
+
+
+def test_verificacao_concluida_nao_conclui_de_novo(op_em_teste):
+    svc, op_id = op_em_teste
+    _ir_para_verificacao(svc, op_id, 10)
+    am = T.sortear_amostra(svc, op_id, "Maria", rnd=random.Random(1))
+    for lid in am["sorteadas"]:
+        T.marcar_amostra(svc, op_id, lid, "ok", "Maria")
+    for i in range(len(am["checklist"])):
+        T.marcar_checklist_final(svc, op_id, i, "ok", "Maria")
+    T.concluir_verificacao(svc, op_id, "Maria")
+    for fn in (lambda: T.concluir_verificacao(svc, op_id, "Maria"),
+               lambda: T.marcar_amostra(svc, op_id, am["sorteadas"][0], "nc", "Maria"),
+               lambda: T.sortear_amostra(svc, op_id, "Maria")):
+        with pytest.raises(OrbitError):
+            fn()
+
+
+def test_nc_aberta_na_verificacao_bloqueia_aprovar(op_em_teste):
+    svc, op_id = op_em_teste
+    _ir_para_verificacao(svc, op_id, 10)
+    am = T.sortear_amostra(svc, op_id, "Maria", rnd=random.Random(1))
+    for lid in am["sorteadas"]:
+        T.marcar_amostra(svc, op_id, lid, "ok", "Maria")
+    for i in range(len(am["checklist"])):
+        T.marcar_checklist_final(svc, op_id, i, "ok", "Maria")
+    T.concluir_verificacao(svc, op_id, "Maria")
+    T.abrir_nc(svc, op_id, "Outro", "porta raspada", "Maria")
+    with pytest.raises(OrbitError):
+        etapas.avancar(svc, op_id)
+
+
+def test_verificador_fora_da_lista_recusado(op_em_teste):
+    svc, op_id = op_em_teste
+    with svc.editar_config() as cfg:
+        cfg["operadores"] = [{"nome": "Maria", "verifica": True}]
+    _ir_para_verificacao(svc, op_id, 10)
+    with pytest.raises(OrbitError):
+        T.sortear_amostra(svc, op_id, "Qualquer Um")
+
+
+def test_substituir_io_guarda_a_anterior(op_em_teste):
+    svc, op_id = op_em_teste
+    T.carregar_io(svc, op_id, [{"tag": "A"}])
+    s = svc.carregar(op_id)["testes"]["io"]["sinais"][0]
+    T.marcar_sinal(svc, op_id, s["id"], "ok", "João")
+    T.carregar_io(svc, op_id, [{"tag": "B"}], substituir=True)
+    io = svc.carregar(op_id)["testes"]["io"]
+    assert [x["tag"] for x in io["sinais"]] == ["B"]
+    assert io["anteriores"][0]["sinais"][0]["resultado"] == "ok"
+
+
+def test_nc_repetida_nao_duplica(op_em_teste):
+    svc, op_id = op_em_teste
+    it = T.itens_inspecao(svc, op_id)[0]
+    T.marcar_inspecao(svc, op_id, it["id"], "nc", "João", obs="x", nc_tipo="Outro")
+    T.marcar_inspecao(svc, op_id, it["id"], "nc", "João", obs="y")
+    assert len(svc.carregar(op_id)["ncs"]) == 1
+    c = T.adicionar_circuito(svc, op_id, "Comando", 500)
+    T.medir_isolacao(svc, op_id, c["id"], 0.3, "João")
+    T.medir_isolacao(svc, op_id, c["id"], 0.2, "João")
+    assert len(svc.carregar(op_id)["ncs"]) == 2
+
+
+def test_reteste_de_isolacao_exige_nova_medicao(op_em_teste):
+    svc, op_id = op_em_teste
+    c = T.adicionar_circuito(svc, op_id, "Comando", 500)
+    T.medir_isolacao(svc, op_id, c["id"], 0.3, "João")
+    nc = svc.carregar(op_id)["ncs"][0]
+    T.corrigir_nc(svc, op_id, nc["id"], "João", "trocado borne")
+    T.verificar_nc(svc, op_id, nc["id"], "Maria")
+    circ = svc.carregar(op_id)["testes"]["isolacao"]["circuitos"][0]
+    assert circ["resultado"] is None and circ["medido_mohm"] is None

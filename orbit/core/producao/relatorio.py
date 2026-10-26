@@ -117,7 +117,7 @@ def gerar_html(svc: ProducaoService, op: dict) -> str:
     p.append("<h2>Não conformidades</h2>")
     situ = {"aberta": "Aberta", "corrigida": "Corrigida", "verificada": "Verificada (reteste OK)"}
     p.append(_tabela(["Nº", "Tipo", "Descrição", "Aberta por", "Correção", "Reteste", "Situação"], [
-        f"<tr><td>{n['numero']}</td><td>{_e(n['tipo'])}</td><td>{_e(n['descricao'])}</td>"
+        f"<tr><td>{_e(n['numero'])}</td><td>{_e(n['tipo'])}</td><td>{_e(n['descricao'])}</td>"
         f"<td>{_e(n['aberta_por'])} {_e(_quando(n['aberta_em']))}</td>"
         f"<td>{_e(n.get('correcao'))} {_e(n.get('corrigida_por'))}</td>"
         f"<td>{_e(n.get('verificada_por'))} {_e(_quando(n.get('verificada_em')))}</td>"

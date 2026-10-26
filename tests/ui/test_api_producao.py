@@ -99,3 +99,13 @@ def test_config_invalida_e_op_sem_base(tmp_path):
     a = Api(settings_path=tmp_path / "s.json", log_path=tmp_path / "l.log")
     r = a.prod_fila()
     assert not r["ok"] and "pasta base" in r["erro"]
+
+
+def test_entradas_invalidas_viram_mensagem(amb):
+    a, pid, tmp, abertos = amb
+    op = _ok(a.prod_criar_op(pid, {"painel": "X"}))
+    for r in (a.prod_ler_planilha("x.csv", ["io"]),
+              a.prod_importar_planilha(op["id"], ["io"], "x.csv", {}),
+              a.prod_situacao_materiais(op["id"], [{"a": 1}], "falta"),
+              a.prod_liberar(op["id"], 5)):
+        assert not r["ok"] and "inesperado" not in r["erro"], r
