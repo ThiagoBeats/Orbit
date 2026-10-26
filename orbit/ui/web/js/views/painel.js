@@ -104,6 +104,7 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
         </div>
         <div class="viewer" id="pn-viewer"></div>
       </main>
+      <div class="pagina" id="pn-producao"></div>
       <div class="pagina" id="pn-anexos-sec"></div>
       <div class="pagina" id="pn-anotacoes"></div>`;
     atualizarSelecao();
@@ -112,6 +113,7 @@ Orbit.views.projeto = Orbit.views.maquina = async (el, id, aindaAtual) => {
     montarAnotacoesProjeto(el.querySelector('#pn-onde-parei'), el.querySelector('#pn-anotacoes'), id)
       .catch(() => {});
     montarAnexos(el.querySelector('#pn-anexos-sec'), id).catch(() => {});
+    montarProducaoProjeto(el.querySelector('#pn-producao'), id).catch(() => {});
   }
 
   function atualizarSelecao() {
