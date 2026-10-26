@@ -109,3 +109,63 @@ def mapear(tabela: dict, mapa: dict, obrigatorios: list[str]) -> list[dict]:
         if all(item.get(c) for c in obrigatorios):
             out.append(item)
     return out
+
+
+# ---------- sugestão automática de colunas ----------
+CAMPOS = {
+    "materiais": (["codigo", "descricao", "quantidade", "unidade", "fabricante"], []),
+    "ponto_a_ponto": (["origem", "destino", "fio", "secao", "cor"], ["origem", "destino"]),
+    "io": (["tag", "descricao", "endereco", "tipo"], ["tag"]),
+}
+NOMES_CAMPOS = {"codigo": "Código", "descricao": "Descrição", "quantidade": "Quantidade",
+                "unidade": "Unidade", "fabricante": "Fabricante", "origem": "Origem",
+                "destino": "Destino", "fio": "Fio", "secao": "Seção", "cor": "Cor",
+                "tag": "Tag", "endereco": "Endereço", "tipo": "Tipo"}
+SINONIMOS = {
+    "codigo": ["codigo", "cod", "part number", "partnumber", "pn", "referencia", "ref",
+               "numero do artigo", "artigo", "order number", "sku"],
+    "descricao": ["descricao", "desc", "description", "designacao", "denominacao", "comentario"],
+    "quantidade": ["quantidade", "qtd", "qtde", "quant", "qty", "quantity", "qde"],
+    "unidade": ["unidade", "un", "und", "unid", "unit", "uom"],
+    "fabricante": ["fabricante", "marca", "manufacturer", "fab"],
+    "origem": ["origem", "de", "from", "source", "inicio", "alvo de origem", "ponto de origem"],
+    "destino": ["destino", "para", "to", "target", "fim", "alvo de destino", "ponto de destino"],
+    "fio": ["fio", "n fio", "no fio", "numero do fio", "wire", "anilha", "condutor",
+            "identificacao", "conexao"],
+    "secao": ["secao", "seccao", "bitola", "section", "cross section", "mm2", "mm²"],
+    "cor": ["cor", "color", "colour"],
+    "tag": ["tag", "simbolo", "bmk", "identificador", "sinal"],
+    "endereco": ["endereco", "address", "end", "io", "i/o", "canal"],
+    "tipo": ["tipo", "type", "di/do"],
+}
+
+
+def _norm(t: str) -> str:
+    import unicodedata
+    s = unicodedata.normalize("NFKD", t or "")
+    s = "".join(c for c in s if not unicodedata.combining(c)).casefold()
+    s = "".join(c if c.isalnum() or c in " /²" else " " for c in s)
+    return " ".join(s.split())
+
+
+def sugerir_mapa(cabecalho: list[str], destino: str) -> dict:
+    if destino not in CAMPOS:
+        raise OrbitError("Destino da importação inválido.")
+    campos, _ = CAMPOS[destino]
+    normal = [_norm(c) for c in cabecalho]
+    usados: set[int] = set()
+    mapa = {}
+    for exato in (True, False):
+        for campo in campos:
+            if mapa.get(campo) is not None:
+                continue
+            mapa[campo] = None
+            for sin in SINONIMOS.get(campo, []):
+                achou = next((i for i, h in enumerate(normal) if i not in usados and h and (
+                    h == sin if exato else (h.startswith(sin + " ") or h.endswith(" " + sin)))),
+                    None)
+                if achou is not None:
+                    mapa[campo] = achou
+                    usados.add(achou)
+                    break
+    return mapa

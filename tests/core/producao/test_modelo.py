@@ -67,3 +67,28 @@ def test_todas_as_ops_de_varios_projetos(prod):
     todas = svc.todas_ops()
     assert sorted(o["painel"] for o in todas) == ["A", "B"]
     assert {o["container_nome"] for o in todas} == {"Envasadora", "Outro projeto"}
+
+
+def test_editar_dados_registra_mudancas(prod):
+    svc, repo, p = prod
+    op = svc.criar_op(p.id, {"painel": "QGBT-01"})
+    op = svc.editar_dados(op["id"], {"prazo": "2026-11-10", "prioridade": "urgente"})
+    assert op["prazo"] == "2026-11-10" and op["prioridade"] == "urgente"
+    assert op["historico"][-1]["acao"] == "op_editada"
+    with pytest.raises(OrbitError):
+        svc.editar_dados(op["id"], {"quantidade": 0})
+
+
+def test_validar_config():
+    from orbit.core.producao.config import validar_config
+    v = validar_config({"operadores": [{"nome": " João ", "verifica": False},
+                                       {"nome": "joão"}, {"nome": ""}],
+                        "motivos_parada": ["Falta de material", " ", "Outro"],
+                        "amostragem_pct": 20, "isolacao_min_mohm": 0.5})
+    assert v["operadores"] == [{"nome": "João", "verifica": False}]
+    assert v["motivos_parada"] == ["Falta de material", "Outro"]
+    assert "proximo_numero" not in validar_config({"proximo_numero": 99})
+    for ruim in ({"amostragem_pct": 0}, {"tipos_nc": []}, {"checklist_iec": [{"texto": " "}]},
+                 {"isolacao_min_mohm": True}):
+        with pytest.raises(OrbitError):
+            validar_config(ruim)

@@ -189,3 +189,13 @@ def test_amostragem_incompleta_nao_conclui(op_em_teste):
     T.sortear_amostra(svc, op_id, "Maria", rnd=random.Random(3))
     with pytest.raises(OrbitError):
         T.concluir_verificacao(svc, op_id, "Maria")
+
+
+def test_operador_sem_habilitacao_nao_verifica(op_em_teste):
+    svc, op_id = op_em_teste
+    with svc.editar_config() as cfg:
+        cfg["operadores"] = [{"nome": "Pedro", "verifica": False}, {"nome": "Maria", "verifica": True}]
+    _ir_para_verificacao(svc, op_id, 10)
+    with pytest.raises(OrbitError):
+        T.sortear_amostra(svc, op_id, "pedro")
+    assert len(T.sortear_amostra(svc, op_id, "Maria")["sorteadas"]) == 10

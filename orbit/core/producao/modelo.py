@@ -159,6 +159,19 @@ class ProducaoService:
         self._indice[op["id"]] = pasta / ARQ_OP
         return op
 
+    def editar_dados(self, op_id: str, dados: dict) -> dict:
+        """Altera painel, descrição, responsável, prioridade, prazo e quantidade.
+
+        A pasta da OP não é renomeada (o número continua identificando a OP)."""
+        campos = self._validar_dados(dados, parcial=True)
+        with self.editar(op_id) as op:
+            antes = {k: op.get(k) for k in campos}
+            op.update(campos)
+            mudou = {k: {"de": antes[k], "para": v} for k, v in campos.items() if antes[k] != v}
+            if mudou:
+                self.registrar(op, "op_editada", mudou)
+        return op
+
     # ---------- leitura e gravação ----------
     def _arquivos(self, container_id: str | None = None) -> list[tuple[str, Path]]:
         ids = [container_id] if container_id else self._containers()

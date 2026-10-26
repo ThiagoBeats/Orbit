@@ -104,3 +104,14 @@ def test_adicionar_item_manual(op):
     assert it["quantidade"] == 3 and it["situacao"] == "pendente"
     with pytest.raises(OrbitError):
         M.adicionar(svc, op_id, {"descricao": " "})
+
+
+def test_sugerir_mapa():
+    m = importar.sugerir_mapa(["Nº", "Origem", "Destino", "Nº do fio", "Seção (mm²)", "Cor"],
+                              "ponto_a_ponto")
+    assert m == {"origem": 1, "destino": 2, "fio": 3, "secao": 4, "cor": 5}
+    m = importar.sugerir_mapa(["Item", "Código", "Descrição", "Qtd.", "Un", "Fabricante"],
+                              "materiais")
+    assert m == {"codigo": 1, "descricao": 2, "quantidade": 3, "unidade": 4, "fabricante": 5}
+    assert importar.sugerir_mapa(["x"], "io") == {"tag": None, "descricao": None,
+                                                  "endereco": None, "tipo": None}

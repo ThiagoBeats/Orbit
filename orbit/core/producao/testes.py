@@ -347,6 +347,10 @@ def sortear_amostra(svc, op_id, verificador, rnd: random.Random | None = None) -
         if verificador.casefold() in {q.casefold() for q in quem_testou}:
             raise OrbitError("A verificação final precisa ser feita por outra pessoa, diferente "
                              "de quem fez o ponto a ponto.")
+        for o in cfg.get("operadores") or []:
+            if isinstance(o, dict) and str(o.get("nome", "")).casefold() == verificador.casefold()                     and not o.get("verifica"):
+                raise OrbitError(f"{verificador} não está habilitado para a verificação final "
+                                 "(Configurações → Produção).")
         n = len(linhas)
         k = min(n, max(int(cfg["amostragem_min"]), math.ceil(n * cfg["amostragem_pct"] / 100)))
         escolhidas = (rnd or random.SystemRandom()).sample([l["id"] for l in linhas], k)
