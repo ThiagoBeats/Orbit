@@ -114,6 +114,31 @@ A tela **Início** é o painel do dia:
 
 Os dois são juntados item a item na sincronização entre casa e empresa.
 
+## Produção (montagem e testes de painéis)
+
+Um "mini ERP" da bancada: chegada da demanda, documentos certos, materiais, horas, paradas e testes com padrão de mercado.
+
+- **Ordem de produção (OP).** Criada no painel do projeto (seção *Produção* → *Nova OP*), com número sequencial `OP-0001`, painel, prazo, prioridade e responsável. Etapas: Planejada → Liberada → Em montagem → Em teste → Verificação final → Aprovada → Expedida, mais o estado *Bloqueada* com motivo.
+- **Pacote de documentos.** Ao liberar a OP, o Orbit congela a revisão atual de cada documento escolhido. A bancada abre exatamente esses arquivos. Se o projeto ganhar revisão nova, a OP mostra o alerta e quem gerencia atualiza o pacote (fica no histórico).
+- **Meu trabalho (bancada).** O operador escolhe o nome no topo e usa os botões Iniciar, Pausar com motivo, Retomar e Encerrar. Um apontamento aberto por pessoa; iniciar outro encerra o anterior. Apontamento esquecido aberto há mais de 10 h aparece na Gestão para correção (fica registrado quem corrigiu).
+- **Materiais.** Lista importada de planilha (`.xlsx` ou `.csv`, com escolha das colunas) e situação por item: pendente, solicitado, recebido, separado ou falta (com observação e previsão).
+- **Testes** (verificação de rotina da IEC 61439-1 §11 e estrutura de FAT da IEC 62381):
+  - A. Inspeção de rotina: checklist editável (IP, distâncias, continuidade do PE, componentes, fiação, aperto marcado, identificação, terminais, operação mecânica, documentação, limpeza);
+  - B. Ponto a ponto: lista de conexões importada, com *Ligação OK* e *Aperto OK* por linha;
+  - C. Resistência de isolação: circuito, tensão de ensaio e valor medido (padrão ≥ 1 MΩ a 500 V);
+  - D. Energização (opcional): passos e pontos de tensão com tolerância (padrão ±10%);
+  - E. Entradas e saídas: lista de tags importada, sinal a sinal.
+- **Não conformidades.** Marcar "NC" numa linha abre a NC com tipo (fio trocado, borne solto, identificação…). Ela só fecha depois da correção e do reteste.
+- **Verificação final por amostragem.** Outra pessoa (habilitada em Configurações → Produção, e diferente de quem fez o ponto a ponto) confere 10% das ligações sorteadas, no mínimo 10, mais um checklist final. Qualquer falha devolve a OP para *Em teste* e zera o ponto a ponto para revisão completa (o anterior fica guardado).
+- **Relatório de ensaio.** HTML imprimível (*Salvar como PDF*) em `Produção\OP-xxxx\Relatório de ensaio OP-xxxx.html`.
+- **Gestão.** OPs por etapa, atrasadas e bloqueadas, horas trabalhadas e paradas na semana, paradas por motivo, horas e ociosidade por operador, faltas de material, Pareto de NCs e quem está trabalhando agora.
+
+| O quê | Arquivo |
+| :--- | :--- |
+| Tudo de uma OP | `<pasta do projeto>\Produção\OP-0001 - <painel>\op.json` |
+| Numeração e configuração da produção | `<pasta base>\.orbit\producao.json` |
+| Último operador usado nesta máquina | `%APPDATA%\Orbit\producao_local.json` |
+
 ## Backup e sincronização
 
 Em **Configurações → Backup**, escolha a pasta de backup. Ela pode estar no servidor da empresa, num HD externo ou numa pasta de nuvem.
@@ -196,6 +221,7 @@ orbit/core/             regras de negócio (sem dependência da interface)
   actionlog.py          log de ações com detecção de adulteração
   backup.py             backup: configurar, espelhar, status e recuperação
   sync/                 sincronização em duas vias (varredura, junção, motor, divergências)
+  producao/             OPs, etapas, apontamentos, materiais, testes, relatório e gestão
 orbit/ui/               janela pywebview, Api exposta ao JavaScript e servidor local de arquivos
 orbit/ui/web/           interface em HTML/CSS/JS (sem framework)
 tests/                  testes automáticos (pytest)
@@ -207,6 +233,7 @@ docs/superpowers/       documento de design e plano de implementação
 - **Novo Outlook:** não permite automação. Nesse caso o Orbit abre um rascunho `.eml` com os anexos.
 - **Acesso pelo Explorer:** o aviso de "outra pessoa no projeto" só enxerga quem está usando o Orbit, não quem abre a pasta pelo Explorer.
 - **Uso em rede:** para várias pessoas na mesma pasta de rede, mantenha os relógios dos computadores sincronizados. As travas usam o horário de cada máquina.
+- **Produção na sincronização:** o `op.json` segue as regras de arquivo comum. Se a mesma OP for alterada em casa e na empresa antes de sincronizar, vira divergência (as duas versões ficam guardadas). O ideal é a produção usar a pasta do servidor ao vivo.
 - **Backup em pasta de nuvem** (OneDrive, Dropbox…): funciona bem para uma máquina. Com várias máquinas sincronizando pela mesma pasta de nuvem, prefira o servidor da empresa.
 - **Lembretes:** só avisam com o Orbit aberto (minimizado também vale).
 - **Verificação do backup:** a comparação automática só roda com o Orbit aberto.
